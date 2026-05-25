@@ -836,12 +836,10 @@ dictType sdsHashDictType = {
 
 /* Dict for binary-safe sds keys with heap values freed via zfree(). */
 dictType sdsKeyHeapPointerValueDictType = {
-    dictSdsHash,       /* hash function */
-    NULL,              /* key dup */
-    dictSdsKeyCompare, /* key compare */
-    dictSdsDestructor, /* key destructor */
-    dictVanillaFree,   /* val destructor */
-    NULL               /* allow to expand */
+    .entryGetKey = dictEntryGetKey,
+    .hashFunction = dictSdsHash,
+    .keyCompare = dictSdsKeyCompare,
+    .entryDestructor = dictEntryDestructorSdsKeyHeapValue,
 };
 
 size_t clientHashtableTypeMetadataSize(void) {
