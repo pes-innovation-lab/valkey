@@ -2901,7 +2901,8 @@ void rreplayCommand(client *c) {
         freeClientAsync(c);
         return;
     }
-    exec_client->raw_flag = 0;
+    exec_client->raw_flag1 = 0;
+    exec_client->raw_flag2 = 0;
     exec_client->flag.fake = 1;
     exec_client->flag.deny_blocking = 1;
     if (dbid >= 0) {
