@@ -1,0 +1,28 @@
+services:
+  valkey-1:
+    build: .
+    container_name: valkey-1
+    ports:
+      - "6380:6379"
+    networks:
+      valkey-net:
+        ipv4_address: 172.28.0.10
+
+  valkey-2:
+    build: .
+    container_name: valkey-2
+    ports:
+      - "6381:6379"
+    volumes:
+      - ./.config/primary2-config.conf:/etc/valkey/primary2-config.conf:ro
+    command: valkey-server /etc/valkey/primary2-config.conf --bind 0.0.0.0 --protected-mode no
+    networks:
+      valkey-net:
+        ipv4_address: 172.28.0.11
+
+networks:
+  valkey-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
