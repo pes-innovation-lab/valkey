@@ -3613,7 +3613,10 @@ bool clientSupportStandAloneRedirect(client *c) {
 static int shouldForwardToPrimaryViaRReplay(int target) {
     if (!(target & PROPAGATE_REPL)) return 0;
     if (!server.active_replica || !server.multi_master) return 0;
-    if (server.primary_host == NULL || server.primary == NULL || server.repl_state != REPL_STATE_CONNECTED) return 0;
+    int has_upstreams = (server.upstream_runtime && listLength(server.upstream_runtime) > 0);
+    if (!has_upstreams) {
+        if (server.primary_host == NULL || server.primary == NULL || server.repl_state != REPL_STATE_CONNECTED) return 0;
+    }
     if (server.loading) return 0;
     if (server.current_client == NULL) return 0;
     /* Never re-wrap traffic that already arrived on replication links. In MM

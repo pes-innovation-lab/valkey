@@ -32,6 +32,9 @@ proc zlistAlikeSort {a b} {
 # Return all log lines starting with the first line that contains a warning.
 # Generally, this will be an assertion error with a stack trace.
 proc crashlog_from_file {filename} {
+    if {![file exists $filename]} {
+        return ""
+    }
     set lines [split [exec cat $filename] "\n"]
     set matched 0
     set logall 0
@@ -52,6 +55,9 @@ proc crashlog_from_file {filename} {
 
 # Return sanitizer log lines
 proc sanitizer_errors_from_file {filename} {
+    if {![file exists $filename]} {
+        return ""
+    }
     set log [exec cat $filename]
     set lines [split [exec cat $filename] "\n"]
 
