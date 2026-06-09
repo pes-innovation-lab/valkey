@@ -1,0 +1,7 @@
+.git
+**/*.o
+**/*.a
+**/*.so
+src/valkey-server
+src/valkey-cli
+src/valkey-benchmark

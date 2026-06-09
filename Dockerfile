@@ -4,13 +4,14 @@ FROM alpine:3.22 AS builder
 RUN apk add --no-cache \
     build-base \
     linux-headers \
-    tcl
+    tcl \
+    pkgconf
 
 WORKDIR /build
 
 COPY . .
 
-RUN make -j$(nproc)
+RUN make distclean && make -j$(nproc)
 
 # Runtime
 FROM alpine:3.22
