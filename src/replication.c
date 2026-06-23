@@ -752,14 +752,14 @@ static void connectConfiguredUpstreamForwardLink(connection *conn) {
     connSetReadHandler(conn, discardUpstreamForwardReplies);
     queueUpstreamForwardHandshake(link_client);
 
-    // ATHARVA COMMENTED THIS
+    // ATHARVA removed all fullsync stuff from multimaster. this assumes happy path where the replay buffer never overflows
+    // not ideal, but works for now
     // if (runtime->replay_fullsync_required) {
     //     upstreamRuntimeRequestPeerFullResync(runtime);
     // } else {
     //     upstreamRuntimeFlushPendingReplayQueue(runtime);
     // }
 
-    serverLog(LL_NOTICE, "This is the fullsync status: %d",runtime->replay_fullsync_required);
     upstreamRuntimeFlushPendingReplayQueue(runtime);
     serverLog(LL_NOTICE, "Connected multi-master peer forwarding link to %s:%d", runtime->host, runtime->port);
 }
@@ -3397,7 +3397,7 @@ void replconfCommand(client *c) {
                 char addr[NET_IP_STR_LEN]; //first init
                 connAddrPeerName(c->conn,addr,sizeof(addr),NULL); // pull ip of peer with established connection
                 serverLog(LL_NOTICE, "Attempting bidirectional connect with %s port %d", addr, c->repl_data->replica_listening_port);
-                addConfiguredUpstreamEndpoint(addr, c->repl_data->replica_listening_port);
+                addConfiguredUpstreamEndpoint(addr, c->repl_data->replica_listening_port); // adds the ip as a upstream
             }
         } else if (!strcasecmp(objectGetVal(c->argv[j]), "ack")) {
             /* REPLCONF ACK is used by replica to inform the primary the amount
@@ -6871,6 +6871,85 @@ void replicationHandlePrimaryDisconnection(void) {
         serverLog(LL_NOTICE, "Reconnecting to PRIMARY %s:%d", server.primary_host, server.primary_port);
         connectWithPrimary();
     }
+}
+// ATHARVA: new command for active active replication. replicaof add works the same way but the hope is that it will be replaced with
+// this eventually
+void multimasterCommand(client *c){
+
+    if (server.cluster_enabled) {
+        addReplyError(c, "REPLICAOF not allowed in cluster mode.");
+        return;
+    }
+
+    if (server.failover_state != NO_FAILOVER) {
+        addReplyError(c, "REPLICAOF not allowed while failing over.");
+        return;
+    }
+
+    if (c->argc == 4 && !strcasecmp(objectGetVal(c->argv[1]), "add")) {
+        long port;
+        if (!server.multi_master) {
+            addReplyError(c, "REPLICAOF ADD requires multi-master yes");
+            return;
+        }
+        if (c->flag.replica) {
+            addReplyError(c, "Command is not valid when client is a replica.");
+            return;
+        }
+        if (getRangeLongFromObjectOrReply(c, c->argv[3], 0, 65535, &port, "Invalid master port") != C_OK) return;
+        if (addConfiguredUpstreamEndpoint(objectGetVal(c->argv[2]), port) != C_OK) {
+            addReplyError(c, "Failed to add upstream endpoint");
+            return;
+        }
+        //if (server.primary_host == NULL) {
+            //replicationSetPrimary(objectGetVal(c->argv[2]), port, 0, true);
+        //}
+        addReply(c, shared.ok);
+        return;
+    } else if (c->argc == 4 && !strcasecmp(objectGetVal(c->argv[1]), "remove")) {
+        long port;
+        if (!server.multi_master) {
+            addReplyError(c, "REPLICAOF REMOVE requires multi-master yes");
+            return;
+        }
+        if (getRangeLongFromObjectOrReply(c, c->argv[3], 0, 65535, &port, "Invalid master port") != C_OK) return;
+
+        int removing_current =
+            server.primary_host && !strcasecmp(server.primary_host, objectGetVal(c->argv[2])) && server.primary_port == port;
+        if (removeConfiguredUpstreamEndpoint(objectGetVal(c->argv[2]), port) != C_OK) {
+            addReplyError(c, "No such configured upstream");
+            return;
+        }
+
+        if (removing_current) {
+            if (listLength(server.upstreams) == 0) {
+                replicationUnsetPrimary();
+            } else {
+                listNode *ln = listFirst(server.upstreams);
+                valkeyUpstream *next = listNodeValue(ln);
+                if (next && next->host) replicationSetPrimary(next->host, next->port, 0, true);
+            }
+        }
+        addReply(c, shared.ok);
+        return;
+    } else if (c->argc != 3) {
+        addReplyErrorObject(c, shared.syntaxerr);
+        return;
+    }
+
+    /* The special host/port combination "NO" "ONE" turns the instance
+     * into a primary. Otherwise the new primary address is set. */
+    if (!strcasecmp(objectGetVal(c->argv[1]), "no") && !strcasecmp(objectGetVal(c->argv[2]), "one")) {
+        // ATHARVA: since we dont deal with primary nodes in multimaster, this isnt needed
+        // if (server.primary_host) {
+        //     replicationUnsetPrimary();
+        //     sds client = catClientInfoShortString(sdsempty(), c, server.hide_user_data_from_log);
+        //     serverLog(LL_NOTICE, "PRIMARY MODE enabled (user request from '%s')", client);
+        //     sdsfree(client);
+        // }
+        clearConfiguredUpstreams();
+    }
+addReply(c, shared.ok);
 }
 
 void replicaofCommand(client *c) {
