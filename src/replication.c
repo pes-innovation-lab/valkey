@@ -562,6 +562,10 @@ static void queueUpstreamForwardCommand(client *c, int argc, const char **argv, 
     }
 }
 
+// ATHARVA: need these forward decarations to make the modifications to this function work
+static const char *upstreamForwardAdvertisedHost(void);
+static int upstreamForwardAdvertisedPort(void);
+
 static void queueUpstreamForwardHandshake(client *c) {
     if (c == NULL) return;
 
@@ -581,6 +585,18 @@ static void queueUpstreamForwardHandshake(client *c) {
     }
 
     {
+        // ATHARVA: we need to tell peer link that this node also needs to be added as an upstream
+        const char *ip =  upstreamForwardAdvertisedHost();
+        const char *address_argv[] = {"REPLCONF", "ip-address", ip};
+        size_t ip_lens[] = {8,10,strlen(ip)};
+        queueUpstreamForwardCommand(c,3,address_argv,ip_lens);
+
+        sds portstr = getReplicaPortString();
+        const char *port_argv[] = {"REPLCONF", "listening-port", portstr};
+        size_t port_lens[] = {8, 14, sdslen(portstr)};
+        queueUpstreamForwardCommand(c, 3, port_argv, port_lens);
+        sdsfree(portstr);
+
         const char *capa_argv[] = {"REPLCONF", "capa", REPLICA_CAPA_RREPLAY_PEER_STR};
         size_t capa_lens[] = {8, 4, strlen(REPLICA_CAPA_RREPLAY_PEER_STR)};
         queueUpstreamForwardCommand(c, 3, capa_argv, capa_lens);
@@ -589,6 +605,7 @@ static void queueUpstreamForwardHandshake(client *c) {
         const char *uuid_argv[] = {"REPLCONF", "uuid", server.runid};
         size_t uuid_lens[] = {8, 4, CONFIG_RUN_ID_SIZE};
         queueUpstreamForwardCommand(c, 3, uuid_argv, uuid_lens);
+
     }
 }
 
@@ -734,11 +751,16 @@ static void connectConfiguredUpstreamForwardLink(connection *conn) {
 
     connSetReadHandler(conn, discardUpstreamForwardReplies);
     queueUpstreamForwardHandshake(link_client);
-    if (runtime->replay_fullsync_required) {
-        upstreamRuntimeRequestPeerFullResync(runtime);
-    } else {
-        upstreamRuntimeFlushPendingReplayQueue(runtime);
-    }
+
+    // ATHARVA COMMENTED THIS
+    // if (runtime->replay_fullsync_required) {
+    //     upstreamRuntimeRequestPeerFullResync(runtime);
+    // } else {
+    //     upstreamRuntimeFlushPendingReplayQueue(runtime);
+    // }
+
+    serverLog(LL_NOTICE, "This is the fullsync status: %d",runtime->replay_fullsync_required);
+    upstreamRuntimeFlushPendingReplayQueue(runtime);
     serverLog(LL_NOTICE, "Connected multi-master peer forwarding link to %s:%d", runtime->host, runtime->port);
 }
 
@@ -3367,8 +3389,16 @@ void replconfCommand(client *c) {
                 }
             } else if (!strcasecmp(objectGetVal(c->argv[j + 1]), REPLICA_CAPA_SKIP_RDB_CHECKSUM_STR))
                 c->repl_data->replica_capa |= REPLICA_CAPA_SKIP_RDB_CHECKSUM;
-            else if (!strcasecmp(objectGetVal(c->argv[j + 1]), REPLICA_CAPA_RREPLAY_PEER_STR))
+            else if (!strcasecmp(objectGetVal(c->argv[j + 1]), REPLICA_CAPA_RREPLAY_PEER_STR)){
                 c->repl_data->replica_capa |= REPLICA_CAPA_RREPLAY_PEER;
+                // ATHARVA: adds the upstream for the current replica. this hopefully allows bidirectional comms
+                // port works fine but A sends local ip so instead we'll use the ip from the conn struct
+
+                char addr[NET_IP_STR_LEN]; //first init
+                connAddrPeerName(c->conn,addr,sizeof(addr),NULL); // pull ip of peer with established connection
+                serverLog(LL_NOTICE, "Attempting bidirectional connect with %s port %d", addr, c->repl_data->replica_listening_port);
+                addConfiguredUpstreamEndpoint(addr, c->repl_data->replica_listening_port);
+            }
         } else if (!strcasecmp(objectGetVal(c->argv[j]), "ack")) {
             /* REPLCONF ACK is used by replica to inform the primary the amount
              * of replication stream that it processed so far. It is an
@@ -6871,9 +6901,9 @@ void replicaofCommand(client *c) {
             addReplyError(c, "Failed to add upstream endpoint");
             return;
         }
-        if (server.primary_host == NULL) {
-            replicationSetPrimary(objectGetVal(c->argv[2]), port, 0, true);
-        }
+        //if (server.primary_host == NULL) {
+            //replicationSetPrimary(objectGetVal(c->argv[2]), port, 0, true);
+        //}
         addReply(c, shared.ok);
         return;
     } else if (c->argc == 4 && !strcasecmp(objectGetVal(c->argv[1]), "remove")) {
