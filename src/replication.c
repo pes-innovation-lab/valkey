@@ -759,6 +759,20 @@ static void connectConfiguredUpstreamForwardLink(connection *conn) {
     // } else {
     //     upstreamRuntimeFlushPendingReplayQueue(runtime);
     // }
+    listNode *ln;
+    ln = listFirst(server.upstream_runtime);
+    while (ln != NULL) {
+        listNode *next = listNextNode(ln);
+        valkeyUpstreamRuntime *existing_runtime = listNodeValue(ln);
+        char *host = existing_runtime->host;
+        char portbuf[32];
+        ll2string(portbuf,sizeof(portbuf),existing_runtime->port);
+        const char *argv[] = {"MULTIMASTER","add", host, portbuf};
+        size_t argv_lens[] = {11,3, strlen(host), strlen(portbuf)};
+        queueUpstreamForwardCommand(runtime->link_client, 4, argv, argv_lens);
+        ln = next;
+    }
+
 
     upstreamRuntimeFlushPendingReplayQueue(runtime);
     serverLog(LL_NOTICE, "Connected multi-master peer forwarding link to %s:%d", runtime->host, runtime->port);
