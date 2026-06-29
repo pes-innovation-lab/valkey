@@ -1605,6 +1605,28 @@ typedef enum {
     PROPAGATION_ERR_BEHAVIOR_PANIC_ON_REPLICAS
 } replicationErrorBehavior;
 
+/* Hybrid Logical Clock (HLC) representation */
+typedef struct {
+    uint64_t wall_clock;
+    uint64_t lamport_clock;
+} hlc_t;
+
+/* Compare two hybrid logical clocks. Returns:
+ * 1 if a > b,
+ * -1 if a < b,
+ * 0 if a == b 
+ *
+ * This first checks wall_clock time
+ * and falls back to lamport to break ties.
+ */
+static int hlcCompare(const hlc_t *a, const hlc_t *b) {
+    if (a->wall_clock > b->wall_clock) return 1;
+    if (a->wall_clock < b->wall_clock) return -1;
+    if (a->lamport_clock > b->lamport_clock) return 1;
+    if (a->lamport_clock < b->lamport_clock) return -1;
+    return 0;
+}
+
 /* A configured upstream endpoint. For now this is a scaffold that mirrors
  * the legacy single primary configuration. */
 typedef struct valkeyUpstream {
