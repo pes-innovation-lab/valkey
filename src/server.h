@@ -1688,11 +1688,11 @@ typedef struct rdbSaveInfo {
     sds *repl_runtime_pending_entries;    /* Pending entries encoded as "<runtime-idx:u64><replay-id:u64><resp-frame-bytes...>". */
     int rreplay_seen_count;               /* Number of persisted dedupe keys from RREPLAY. */
     sds *rreplay_seen_entries;            /* Dedupe keys encoded as "<origin-uuid>:<replay-id>". */
-    uint64_t mvcc_clock;                  /* Global MVCC logical clock persisted in RDB AUX. */
-    dict *mvcc_key_clock;                 /* Encoded key clock map loaded from RDB AUX. */
+    hlc_t hlc_clock;                      /* Global HLC logical clock persisted in RDB AUX. */
+    dict *hlc_key_clock;                  /* Encoded key clock map loaded from RDB AUX. */
 } rdbSaveInfo;
 
-#define RDB_SAVE_INFO_INIT {-1, 0, "0000000000000000000000000000000000000000", -1, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL}
+#define RDB_SAVE_INFO_INIT {-1, 0, "0000000000000000000000000000000000000000", -1, 0, NULL, 0, NULL, 0, NULL, 0, NULL, {0, 0}, NULL}
 
 struct malloc_stats {
     size_t zmalloc_used;
@@ -2227,11 +2227,11 @@ struct valkeyServer {
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
     long long rreplay_pending_max_entries; /* Per-upstream pending replay frame queue cap. */
-    dict *mvcc_key_clock; /* Key-level LWW clock map. Key: binary(dbid)+key-bytes, Value: uint64_t*. */
-    dict *mvcc_key_tie_break; /* Deterministic tie-break map. Key: binary(dbid)+key-bytes, Value: zstrdup("<uuid>:<id>"). */
-    uint64_t mvcc_clock;  /* Monotonic local logical clock used by replay frames. */
-    long long mvcc_rdb_clock_max_entries; /* Configurable cap for persisted MVCC key clocks in RDB AUX. */
-    unsigned long long mvcc_rdb_clock_entries_dropped_last_save; /* Last RDB save: valid MVCC entries omitted by cap. */
+    dict *hlc_key_clock; /* Key-level LWW clock map. Key: binary(dbid)+key-bytes, Value: hlc_t*. */
+    dict *hlc_key_tie_break; /* Deterministic tie-break map. Key: binary(dbid)+key-bytes, Value: zstrdup("<uuid>:<id>"). */
+    hlc_t hlc_clock;  /* Hybrid logical clock */
+    long long hlc_rdb_clock_max_entries; /* Configurable cap for persisted HLC key clocks in RDB AUX. */
+    unsigned long long hlc_rdb_clock_entries_dropped_last_save; /* Last RDB save: valid HLC entries omitted by cap. */
     char *primary_user;     /* AUTH with this user and primary_auth with primary */
     sds primary_auth;       /* AUTH with this password with primary */
     char *primary_host;     /* Hostname of primary */
@@ -4393,5 +4393,13 @@ int iAmPrimary(void);
 
 #define STRINGIFY_(x) #x
 #define STRINGIFY(x) STRINGIFY_(x)
+
+/* Temp mapping while transitioning 
+ * TODO: Remove once transition is over. */
+#define mvcc_clock hlc_clock.wall_clock
+#define mvcc_key_clock hlc_key_clock
+#define mvcc_key_tie_break hlc_key_tie_break
+#define mvcc_rdb_clock_max_entries hlc_rdb_clock_max_entries
+#define mvcc_rdb_clock_entries_dropped_last_save hlc_rdb_clock_entries_dropped_last_save
 
 #endif
