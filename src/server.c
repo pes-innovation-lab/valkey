@@ -6740,11 +6740,12 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
                 "upstream_runtime_replay_pending_frames:%llu\r\n", upstream_runtime_replay_pending_frames,
                 "upstream_runtime_replay_pending_dropped:%llu\r\n", upstream_runtime_replay_pending_dropped,
                 "upstream_runtime_replay_fullsync_requests:%llu\r\n", upstream_runtime_replay_fullsync_requests,
-                "mvcc_clock:%llu\r\n", (unsigned long long)server.mvcc_clock,
-                "mvcc_key_clock_entries:%lu\r\n", server.mvcc_key_clock ? dictSize(server.mvcc_key_clock) : 0,
-                "mvcc_key_tie_break_entries:%lu\r\n", server.mvcc_key_tie_break ? dictSize(server.mvcc_key_tie_break) : 0,
-                "mvcc_rdb_clock_max_entries:%lld\r\n", server.mvcc_rdb_clock_max_entries,
-                "mvcc_rdb_clock_entries_dropped_last_save:%llu\r\n", server.mvcc_rdb_clock_entries_dropped_last_save,
+                "hlc_clock_wall:%llu\r\n", (unsigned long long)server.hlc_clock.wall_clock,
+                "hlc_clock_lamport:%llu\r\n", (unsigned long long)server.hlc_clock.lamport_clock,
+                "hlc_key_clock_entries:%lu\r\n", server.hlc_key_clock ? dictSize(server.hlc_key_clock) : 0,
+                "hlc_key_tie_break_entries:%lu\r\n", server.hlc_key_tie_break ? dictSize(server.hlc_key_tie_break) : 0,
+                "hlc_rdb_clock_max_entries:%lld\r\n", server.hlc_rdb_clock_max_entries,
+                "hlc_rdb_clock_entries_dropped_last_save:%llu\r\n", server.hlc_rdb_clock_entries_dropped_last_save,
                 "rreplay_dedupe_entries:%lu\r\n", server.rreplay_seen ? dictSize(server.rreplay_seen) : 0));
 
         list *info_upstreams =
