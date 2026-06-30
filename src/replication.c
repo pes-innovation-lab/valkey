@@ -2456,8 +2456,13 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     frame_argv[1] = createStringObject(server.runid, CONFIG_RUN_ID_SIZE);
     frame_argv[2] = createStringObjectFromLongLong(dictid);
     frame_argv[3] = createStringObjectFromLongLong((long long)replay_id);
-    frame_argv[4] = createStringObjectFromLongLong((long long)hlc_ts.wall_clock);
-    /*TODO: need to add another frame with lamport ts, will do after making changes to serialization as well. */
+    /* Serialize HLC timestamp as <wall_clock>-<lamport_clock> string representation */
+    char hlc_buf[64];
+    int hlc_len = snprintf(hlc_buf, sizeof(hlc_buf), 
+    "%llu-%llu",
+    (unsigned long long)hlc_ts.wall_clock, 
+    (unsigned long long)hlc_ts.lamport_clock);
+    frame_argv[4] = createStringObject(hlc_buf, hlc_len);
     for (int j = 0; j < payload_argc; j++) {
         frame_argv[j + 5] = payload_argv[j];
         incrRefCount(frame_argv[j + 5]);
@@ -3553,15 +3558,61 @@ void rreplayCommand(client *c) {
     int payload_start = 4;
     hlc_t hlc_ts = {0, 0};
     if (c->argc >= 6) {
-        long long parsed_ts = 0;
-        if (getLongLongFromObject(c->argv[4], &parsed_ts) == C_OK && parsed_ts > 0) {
-            hlc_ts.wall_clock = (uint64_t)parsed_ts;
-            hlc_ts.lamport_clock = 0;
-            payload_start = 5;
-            if (hlc_ts.wall_clock > server.hlc_clock.wall_clock) {
-                server.hlc_clock.wall_clock = hlc_ts.wall_clock;
+        robj *decoded = getDecodedObject(c->argv[4]); /* Convert to str to perform hyphen check*/
+        char *str = objectGetVal(decoded);
+        char *hyphen = strchr(str, '-');
+        uint64_t wall = 0;
+        uint64_t lamport = 0;
+        int parsed = 0;
+
+        if (hyphen) {
+            /* Parse hyphenated format: <wall_clock>-<lamport_clock> without modifying string in-place */
+            char *endptr1 = NULL;
+            char *endptr2 = NULL;
+            unsigned long long wall_val = strtoull(str, &endptr1, 10);
+            unsigned long long lamport_val = strtoull(hyphen + 1, &endptr2, 10);
+            if (endptr1 == hyphen && endptr1 != str && endptr2 != (hyphen + 1) && *endptr2 == '\0') {
+                wall = wall_val;
+                lamport = lamport_val;
+                parsed = (wall > 0);
+            }
+        } else {
+            /* Parse legacy plain integer format for backward compatibility */
+            char *endptr = NULL;
+            unsigned long long wall_val = strtoull(str, &endptr, 10); /* Convert str back to ull */
+            if (endptr != str && *endptr == '\0') {
+                wall = wall_val;
+                lamport = 0;
+                parsed = (wall > 0);
+            }
+        }
+        decrRefCount(decoded);
+
+        if (parsed) {
+            hlc_ts.wall_clock = wall;
+            hlc_ts.lamport_clock = lamport;
+            payload_start = 5; /* Start index of payload in the command */
+
+            /* HLC receive/merge algorithm:
+             * 1. Find max wall clock time among physical time, local wall clock, and remote wall clock.
+             * 2. Adjust Lamport logical counter based on which clocks match the maximum wall clock.
+             * 3. Update the global clock. */
+             
+            uint64_t physical_time = ustime();
+            uint64_t max_wall = server.hlc_clock.wall_clock;
+            if (physical_time > max_wall) max_wall = physical_time;
+            if (hlc_ts.wall_clock > max_wall) max_wall = hlc_ts.wall_clock;
+
+            if (max_wall == server.hlc_clock.wall_clock && max_wall == hlc_ts.wall_clock) { /* Wall clocks are the same, compare Lamport ts */
+                server.hlc_clock.lamport_clock = (server.hlc_clock.lamport_clock > hlc_ts.lamport_clock ? server.hlc_clock.lamport_clock : hlc_ts.lamport_clock) + 1;
+            } else if (max_wall == server.hlc_clock.wall_clock) {
+                server.hlc_clock.lamport_clock++;
+            } else if (max_wall == hlc_ts.wall_clock) {
+                server.hlc_clock.lamport_clock = hlc_ts.lamport_clock + 1;
+            } else {
                 server.hlc_clock.lamport_clock = 0;
             }
+            server.hlc_clock.wall_clock = max_wall;
         }
     }
 
