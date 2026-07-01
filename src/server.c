@@ -7517,7 +7517,7 @@ void loadDataFromDisk(void) {
             /* Restore multi-master upstream metadata persisted in AUX fields. */
             replicationApplyRdbConfiguredUpstreams(&rsi);
             replicationApplyRdbUpstreamRuntimeState(&rsi);
-            replicationApplyRdbMVCCState(&rsi);
+            replicationApplyRdbHLCState(&rsi);
             replicationApplyRdbRReplaySeen(&rsi);
 
             /* Restore the replication ID / offset from the RDB file. */

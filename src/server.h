@@ -3296,7 +3296,7 @@ void replicationUnsetPrimary(void);
 void replicationApplyRdbConfiguredUpstreams(const rdbSaveInfo *rsi);
 void replicationApplyRdbUpstreamRuntimeState(const rdbSaveInfo *rsi);
 void replicationApplyRdbRReplaySeen(const rdbSaveInfo *rsi);
-void replicationApplyRdbMVCCState(const rdbSaveInfo *rsi);
+void replicationApplyRdbHLCState(const rdbSaveInfo *rsi);
 hlc_t replicationHLCGetKeyClock(int dbid, robj *key);
 void replicationHLCSetKeyClock(int dbid, robj *key, hlc_t ts);
 void refreshGoodReplicasCount(void);

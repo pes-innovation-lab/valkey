@@ -1209,37 +1209,38 @@ void replicationApplyRdbUpstreamRuntimeState(const rdbSaveInfo *rsi) {
     syncUpstreamRuntimeWithConfigured();
 }
 
-void replicationApplyRdbMVCCState(const rdbSaveInfo *rsi) {
-    if (server.mvcc_key_clock == NULL) return;
+void replicationApplyRdbHLCState(const rdbSaveInfo *rsi) {
+    if (server.hlc_key_clock == NULL) return;
 
-    dictEmpty(server.mvcc_key_clock, NULL);
-    if (server.mvcc_key_tie_break) dictEmpty(server.mvcc_key_tie_break, NULL);
-    server.mvcc_clock = 0;
+    dictEmpty(server.hlc_key_clock, NULL);
+    if (server.hlc_key_tie_break) dictEmpty(server.hlc_key_tie_break, NULL);
+    server.hlc_clock.wall_clock = 0;
+    server.hlc_clock.lamport_clock = 0;
 
     if (rsi == NULL) return;
-    if (rsi->mvcc_clock > server.mvcc_clock) {
-        server.mvcc_clock = rsi->mvcc_clock;
+    if (hlcCompare(&rsi->hlc_clock, &server.hlc_clock) > 0) {
+        server.hlc_clock = rsi->hlc_clock;
     }
-    if (rsi->mvcc_key_clock == NULL) return;
+    if (rsi->hlc_key_clock == NULL) return;
 
     dictIterator di;
-    dictInitIterator(&di, rsi->mvcc_key_clock);
+    dictInitIterator(&di, rsi->hlc_key_clock);
     dictEntry *de = NULL;
     while ((de = dictNext(&di)) != NULL) {
         sds key = sdsdup(dictGetKey(de));
-        uint64_t *src_clock = dictGetVal(de);
-        if (src_clock == NULL || *src_clock == 0) {
+        hlc_t *src_clock = dictGetVal(de);
+        if (src_clock == NULL || (src_clock->wall_clock == 0 && src_clock->lamport_clock == 0)) {
             sdsfree(key);
             continue;
         }
-        uint64_t *dst_clock = zmalloc(sizeof(*dst_clock));
+        hlc_t *dst_clock = zmalloc(sizeof(*dst_clock));
         *dst_clock = *src_clock;
 
-        if (dictAdd(server.mvcc_key_clock, key, dst_clock) != DICT_OK) {
-            dictEntry *existing = dictFind(server.mvcc_key_clock, key);
+        if (dictAdd(server.hlc_key_clock, key, dst_clock) != DICT_OK) {
+            dictEntry *existing = dictFind(server.hlc_key_clock, key);
             if (existing) {
-                uint64_t *existing_clock = dictGetVal(existing);
-                if (existing_clock && *dst_clock > *existing_clock) {
+                hlc_t *existing_clock = dictGetVal(existing);
+                if (existing_clock && hlcCompare(dst_clock, existing_clock) > 0) {
                     *existing_clock = *dst_clock;
                 }
             }
@@ -1247,7 +1248,9 @@ void replicationApplyRdbMVCCState(const rdbSaveInfo *rsi) {
             zfree(dst_clock);
             continue;
         }
-        if (*dst_clock > server.mvcc_clock) server.mvcc_clock = *dst_clock;
+        if (hlcCompare(dst_clock, &server.hlc_clock) > 0) {
+            server.hlc_clock = *dst_clock;
+        }
     }
 }
 
@@ -4536,7 +4539,7 @@ void replicaAfterLoadPrimaryRDB(connection *conn, rdbSaveInfo *rsi, int disk_bas
      * during FULLRESYNC, otherwise peers may inherit each other's upstream
      * topology (including self-references). */
     syncUpstreamRuntimeWithConfigured();
-    replicationApplyRdbMVCCState(rsi);
+    replicationApplyRdbHLCState(rsi);
     replicationApplyRdbRReplaySeen(rsi);
 
     /* Final setup of the connected replica <- primary link */
