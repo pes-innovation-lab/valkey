@@ -152,7 +152,7 @@ struct ValkeyModule;
 #define CONFIG_RUN_ID_SIZE 40
 #define RDB_EOF_MARK_SIZE 40
 #define CONFIG_REPL_BACKLOG_MIN_SIZE (1024 * 16) /* 16k */
-#define CONFIG_DEFAULT_MVCC_RDB_CLOCK_MAX_ENTRIES 200000
+#define CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES 200000
 #define CONFIG_DEFAULT_RREPLAY_PENDING_MAX_ENTRIES 50000
 #define CONFIG_BGSAVE_RETRY_DELAY 5              /* Wait a few secs before trying again. */
 #define CONFIG_DEFAULT_PID_FILE "/var/run/valkey.pid"
@@ -4394,12 +4394,6 @@ int iAmPrimary(void);
 #define STRINGIFY_(x) #x
 #define STRINGIFY(x) STRINGIFY_(x)
 
-/* Temp mapping while transitioning 
- * TODO: Remove once transition is over. */
-#define mvcc_clock hlc_clock.wall_time
-#define mvcc_key_clock hlc_key_clock
-#define mvcc_key_tie_break hlc_key_tie_break
-#define mvcc_rdb_clock_max_entries hlc_rdb_clock_max_entries
-#define mvcc_rdb_clock_entries_dropped_last_save hlc_rdb_clock_entries_dropped_last_save
+
 
 #endif

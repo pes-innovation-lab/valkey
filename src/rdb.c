@@ -1411,9 +1411,9 @@ void rdbFreeSaveInfo(rdbSaveInfo *rsi) {
         rsi->repl_masters_count = 0;
     }
 
-    if (rsi->mvcc_key_clock) {
-        dictRelease(rsi->mvcc_key_clock);
-        rsi->mvcc_key_clock = NULL;
+    if (rsi->hlc_key_clock) {
+        dictRelease(rsi->hlc_key_clock);
+        rsi->hlc_key_clock = NULL;
     }
 
     if (rsi->repl_runtime_entries) {
@@ -1442,14 +1442,14 @@ void rdbFreeSaveInfo(rdbSaveInfo *rsi) {
         rsi->rreplay_seen_entries = NULL;
         rsi->rreplay_seen_count = 0;
     }
-    rsi->mvcc_clock = 0;
+    rsi->hlc_clock.wall_time = 0;
 }
 
-static int rdbSaveInfoEnsureMVCCClockMap(rdbSaveInfo *rsi) {
+static int rdbSaveInfoEnsureHLCClockMap(rdbSaveInfo *rsi) {
     if (rsi == NULL) return C_ERR;
-    if (rsi->mvcc_key_clock != NULL) return C_OK;
-    rsi->mvcc_key_clock = dictCreate(&sdsKeyHeapPointerValueDictType);
-    return rsi->mvcc_key_clock != NULL ? C_OK : C_ERR;
+    if (rsi->hlc_key_clock != NULL) return C_OK;
+    rsi->hlc_key_clock = dictCreate(&sdsKeyHeapPointerValueDictType);
+    return rsi->hlc_key_clock != NULL ? C_OK : C_ERR;
 }
 
 /* Save a few default AUX fields with information about the RDB generated. */
@@ -3757,7 +3757,7 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                         decrRefCount(auxval);
                         goto eoferr;
                     }
-                    if (rdbSaveInfoEnsureMVCCClockMap(rsi) != C_OK) {
+                    if (rdbSaveInfoEnsureHLCClockMap(rsi) != C_OK) {
                         decrRefCount(auxkey);
                         decrRefCount(auxval);
                         goto eoferr;
@@ -3790,7 +3790,7 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                         decrRefCount(auxval);
                         goto eoferr;
                     }
-                    if (rdbSaveInfoEnsureMVCCClockMap(rsi) != C_OK) {
+                    if (rdbSaveInfoEnsureHLCClockMap(rsi) != C_OK) {
                         decrRefCount(auxkey);
                         decrRefCount(auxval);
                         goto eoferr;

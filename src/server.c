@@ -2396,7 +2396,7 @@ void initServerConfig(void) {
     server.hlc_key_tie_break = NULL;
     server.hlc_clock.wall_time = 0;
     server.hlc_clock.logical = 0;
-    server.hlc_rdb_clock_max_entries = CONFIG_DEFAULT_MVCC_RDB_CLOCK_MAX_ENTRIES;
+    server.hlc_rdb_clock_max_entries = CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES;
     server.hlc_rdb_clock_entries_dropped_last_save = 0;
     server.primary_host = NULL;
     server.primary_port = 6379;
