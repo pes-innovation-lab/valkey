@@ -94,7 +94,7 @@ start_server {tags {"repl external:skip"}} {
         test {RREPLAY still rejects risky raw replay frames} {
             assert_equal OK [$node0 replconf capa rreplay-peer]
             assert_equal OK [$node0 replconf uuid 1111111111111111111111111111111111111111]
-            set rc [catch {$node0 rreplay 2222222222222222222222222222222222222222 0 9010 100 append mm:rmw:raw x}]
+            set rc [catch {$node0 rreplay 2222222222222222222222222222222222222222 0 9010 100-0 append mm:rmw:raw x}]
             assert {$rc != 0}
             assert_equal {} [$node0 get mm:rmw:raw]
         }
@@ -130,7 +130,7 @@ start_server {tags {"repl external:skip"}} {
 
             assert_equal OK [$node0 replconf capa rreplay-peer]
             assert_equal OK [$node0 replconf uuid 1111111111111111111111111111111111111111]
-            assert_equal 9001 [$node0 rreplay 2222222222222222222222222222222222222222 $dbid 9001 $replay_ts mset mm:mset:k1 new1 mm:mset:k2 new2]
+            assert_equal 9001 [$node0 rreplay 2222222222222222222222222222222222222222 $dbid 9001 $replay_ts-0 mset mm:mset:k1 new1 mm:mset:k2 new2]
 
             assert_equal "new1" [$node0 get mm:mset:k1]
             assert_equal "keep" [$node0 get mm:mset:k2]
@@ -309,6 +309,50 @@ start_server {tags {"repl external:skip"}} {
             for {set i 4} {$i <= 8} {incr i} {
                 assert_equal "final-$i" [$node0 get "mm:mvcc-cap:$i"]
             }
+        }
+
+        test {HLC clock drift updates global HLC clock on replica} {
+            # Check current clock
+            set initial_wall [s -1 hlc_clock_wall]
+            set future_wall [expr {$initial_wall + 10000000}]
+            
+            # Send RREPLAY with future wall time
+            assert_equal OK [$node0 replconf capa rreplay-peer]
+            assert_equal OK [$node0 replconf uuid 9999999999999999999999999999999999999999]
+            $node0 rreplay 8888888888888888888888888888888888888888 $dbid 9999 $future_wall-0 set mm:drift:k1 val1
+            
+            # Verify node0 clock wall time updated
+            assert {[s -1 hlc_clock_wall] >= $future_wall}
+        }
+
+        test {HLC logical clock increments when wall clocks are same} {
+            set current_wall [s -1 hlc_clock_wall]
+            
+            # Send a frame with same wall time but higher logical clock (e.g., 5)
+            $node0 rreplay 8888888888888888888888888888888888888888 $dbid 10000 $current_wall-5 set mm:drift:k1 val2
+            
+            # Since incoming logical was 5, server logical should become at least 6
+            assert {[s -1 hlc_clock_lamport] >= 6}
+        }
+
+        test {HLC deterministic tie-breaking on identical HLC timestamps} {
+            # Let's set target wall time
+            set target_wall [expr {[s -1 hlc_clock_wall] + 50000}]
+            
+            # Select the correct database scope
+            $node0 select $dbid
+
+            # 1. Apply a write with lower tie-breaker (uuid: 1111...)
+            $node0 rreplay 1111111111111111111111111111111111111111 $dbid 20000 $target_wall-0 set mm:tie:k1 low_val
+            assert_equal "low_val" [$node0 get mm:tie:k1]
+            
+            # 2. Apply a write with higher tie-breaker (uuid: 3333...) at same timestamp
+            $node0 rreplay 3333333333333333333333333333333333333333 $dbid 20000 $target_wall-0 set mm:tie:k1 high_val
+            assert_equal "high_val" [$node0 get mm:tie:k1]
+            
+            # 3. Try to overwrite with lower tie-breaker (uuid: 2222...) at same timestamp (should be rejected)
+            $node0 rreplay 2222222222222222222222222222222222222222 $dbid 20000 $target_wall-0 set mm:tie:k1 mid_val
+            assert_equal "high_val" [$node0 get mm:tie:k1]
         }
     }
 }
