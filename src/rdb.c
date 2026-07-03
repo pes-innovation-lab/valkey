@@ -1268,7 +1268,7 @@ ssize_t rdbSaveAuxFieldStrInt(rio *rdb, char *key, long long val) {
 
 typedef struct hlcPersistEntry {
     sds key;
-    hlc_t ts;
+    hlc ts;
 } hlcPersistEntry;
 
 /* lexicographical comparison to break ties */
@@ -1468,8 +1468,8 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
         if (rdbSaveAuxFieldStrInt(rdb, "repl-stream-db", rsi->repl_stream_db) == -1) return -1;
         if (rdbSaveAuxFieldStrStr(rdb, "repl-id", server.replid) == -1) return -1;
         if (rdbSaveAuxFieldStrInt(rdb, "repl-offset", server.primary_repl_offset) == -1) return -1;
-        if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-wall", server.hlc_clock.wall_clock) == -1) return -1;
-        if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-lamport", server.hlc_clock.lamport_clock) == -1) return -1;
+        if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-wall", server.hlc_clock.wall_time) == -1) return -1;
+        if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-lamport", server.hlc_clock.logical) == -1) return -1;
         unsigned long upstream_count = server.upstreams ? listLength(server.upstreams) : 0;
         if (rdbSaveAuxFieldStrInt(rdb, "repl-masters-count", upstream_count) == -1) return -1;
         if (upstream_count) {
@@ -1579,8 +1579,8 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
 
             while ((de = dictNext(&di)) != NULL) {
                 sds mvcc_key = dictGetKey(de);
-                hlc_t *clockp = dictGetVal(de);
-                if (mvcc_key == NULL || clockp == NULL || (clockp->wall_clock == 0 && clockp->lamport_clock == 0)) continue;
+                hlc *clockp = dictGetVal(de);
+                if (mvcc_key == NULL || clockp == NULL || (clockp->wall_time == 0 && clockp->logical == 0)) continue;
                 valid_entries++;
 
                 hlcPersistEntry candidate = {
@@ -1595,8 +1595,8 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
             }
 
             for (unsigned long mvcc_id = 0; mvcc_id < heap_size; mvcc_id++) {
-                uint64_t wall_be = htonu64(heap[mvcc_id].ts.wall_clock);
-                uint64_t lamport_be = htonu64(heap[mvcc_id].ts.lamport_clock);
+                uint64_t wall_be = htonu64(heap[mvcc_id].ts.wall_time);
+                uint64_t lamport_be = htonu64(heap[mvcc_id].ts.logical);
                 sds auxkey = sdscatprintf(sdsempty(), "hlc-key-%lu", mvcc_id);
                 sds auxval = sdsnewlen(&wall_be, sizeof(wall_be));
                 auxval = sdscatlen(auxval, &lamport_be, sizeof(lamport_be));
@@ -3655,19 +3655,19 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
             } else if (!strcasecmp(objectGetVal(auxkey), "hlc-clock-wall")) {
                 if (rsi) {
                     long long val = strtoll(objectGetVal(auxval), NULL, 10);
-                    if (val > 0) rsi->hlc_clock.wall_clock = (uint64_t)val;
+                    if (val > 0) rsi->hlc_clock.wall_time = (uint64_t)val;
                 }
             } else if (!strcasecmp(objectGetVal(auxkey), "hlc-clock-lamport")) {
                 if (rsi) {
                     long long val = strtoll(objectGetVal(auxval), NULL, 10);
-                    if (val >= 0) rsi->hlc_clock.lamport_clock = (uint64_t)val;
+                    if (val >= 0) rsi->hlc_clock.logical = (uint64_t)val;
                 }
             } else if (!strcasecmp(objectGetVal(auxkey), "mvcc-clock")) {
                 if (rsi) {
                     long long val = strtoll(objectGetVal(auxval), NULL, 10);
                     if (val > 0) {
-                        rsi->hlc_clock.wall_clock = (uint64_t)val;
-                        rsi->hlc_clock.lamport_clock = 0;
+                        rsi->hlc_clock.wall_time = (uint64_t)val;
+                        rsi->hlc_clock.logical = 0;
                     }
                 }
             } else if (!strcasecmp(objectGetVal(auxkey), "repl-masters-count")) {
@@ -3766,16 +3766,16 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                     uint64_t wall_be = 0, lamport_be = 0;
                     memcpy(&wall_be, raw, sizeof(uint64_t));
                     memcpy(&lamport_be, raw + sizeof(uint64_t), sizeof(uint64_t));
-                    hlc_t ts = { ntohu64(wall_be), ntohu64(lamport_be) };
+                    hlc ts = { ntohu64(wall_be), ntohu64(lamport_be) };
                     if (hlcCompare(&ts, &rsi->hlc_clock) > 0) rsi->hlc_clock = ts;
 
                     sds hlc_key = sdsnewlen(raw + sizeof(uint64_t) * 2, sdslen(raw) - sizeof(uint64_t) * 2);
-                    hlc_t *clockp = zmalloc(sizeof(*clockp));
+                    hlc *clockp = zmalloc(sizeof(*clockp));
                     *clockp = ts;
                     if (dictAdd(rsi->hlc_key_clock, hlc_key, clockp) != DICT_OK) {
                         dictEntry *de = dictFind(rsi->hlc_key_clock, hlc_key);
                         if (de) {
-                            hlc_t *existing = dictGetVal(de);
+                            hlc *existing = dictGetVal(de);
                             if (existing && hlcCompare(&ts, existing) > 0) *existing = ts;
                         }
                         sdsfree(hlc_key);
@@ -3799,16 +3799,16 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                     uint64_t ts_be = 0;
                     memcpy(&ts_be, raw, sizeof(ts_be));
                     uint64_t ts = ntohu64(ts_be);
-                    hlc_t hlc_ts = {ts, 0};
+                    hlc hlc_ts = {ts, 0};
                     if (hlcCompare(&hlc_ts, &rsi->hlc_clock) > 0) rsi->hlc_clock = hlc_ts;
 
                     sds mvcc_key = sdsnewlen(raw + sizeof(uint64_t), sdslen(raw) - sizeof(uint64_t));
-                    hlc_t *clockp = zmalloc(sizeof(*clockp));
+                    hlc *clockp = zmalloc(sizeof(*clockp));
                     *clockp = hlc_ts;
                     if (dictAdd(rsi->hlc_key_clock, mvcc_key, clockp) != DICT_OK) {
                         dictEntry *de = dictFind(rsi->hlc_key_clock, mvcc_key);
                         if (de) {
-                            hlc_t *existing = dictGetVal(de);
+                            hlc *existing = dictGetVal(de);
                             if (existing && hlcCompare(&hlc_ts, existing) > 0) *existing = hlc_ts;
                         }
                         sdsfree(mvcc_key);

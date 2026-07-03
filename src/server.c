@@ -2394,8 +2394,8 @@ void initServerConfig(void) {
     server.rreplay_pending_max_entries = CONFIG_DEFAULT_RREPLAY_PENDING_MAX_ENTRIES;
     server.hlc_key_clock = NULL;
     server.hlc_key_tie_break = NULL;
-    server.hlc_clock.wall_clock = 0;
-    server.hlc_clock.lamport_clock = 0;
+    server.hlc_clock.wall_time = 0;
+    server.hlc_clock.logical = 0;
     server.hlc_rdb_clock_max_entries = CONFIG_DEFAULT_MVCC_RDB_CLOCK_MAX_ENTRIES;
     server.hlc_rdb_clock_entries_dropped_last_save = 0;
     server.primary_host = NULL;
@@ -6740,8 +6740,8 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
                 "upstream_runtime_replay_pending_frames:%llu\r\n", upstream_runtime_replay_pending_frames,
                 "upstream_runtime_replay_pending_dropped:%llu\r\n", upstream_runtime_replay_pending_dropped,
                 "upstream_runtime_replay_fullsync_requests:%llu\r\n", upstream_runtime_replay_fullsync_requests,
-                "hlc_clock_wall:%llu\r\n", (unsigned long long)server.hlc_clock.wall_clock,
-                "hlc_clock_lamport:%llu\r\n", (unsigned long long)server.hlc_clock.lamport_clock,
+                "hlc_clock_wall:%llu\r\n", (unsigned long long)server.hlc_clock.wall_time,
+                "hlc_clock_lamport:%llu\r\n", (unsigned long long)server.hlc_clock.logical,
                 "hlc_key_clock_entries:%lu\r\n", server.hlc_key_clock ? dictSize(server.hlc_key_clock) : 0,
                 "hlc_key_tie_break_entries:%lu\r\n", server.hlc_key_tie_break ? dictSize(server.hlc_key_tie_break) : 0,
                 "hlc_rdb_clock_max_entries:%lld\r\n", server.hlc_rdb_clock_max_entries,

@@ -218,8 +218,8 @@ static void restoreGenericCommand(client *c, int use_mvcc_ts) {
         mvcc_ts = mvcc_ts_ll;
         options_start = 5;
 
-        hlc_t current_clock = replicationHLCGetKeyClock(c->db->id, c->argv[1]);
-        hlc_t restore_clock = {mvcc_ts, 0};
+        hlc current_clock = replicationHLCGetKeyClock(c->db->id, c->argv[1]);
+        hlc restore_clock = {mvcc_ts, 0};
         if (hlcCompare(&restore_clock, &current_clock) < 0) {
             addReply(c, shared.ok);
             return;
@@ -330,7 +330,7 @@ static void restoreGenericCommand(client *c, int use_mvcc_ts) {
     signalModifiedKey(c, c->db, key);
     notifyKeyspaceEvent(NOTIFY_GENERIC, "restore", key, c->db->id);
     if (use_mvcc_ts) {
-        hlc_t restore_clock = {mvcc_ts, 0};
+        hlc restore_clock = {mvcc_ts, 0};
         replicationHLCSetKeyClock(c->db->id, key, restore_clock);
     }
     addReply(c, shared.ok);

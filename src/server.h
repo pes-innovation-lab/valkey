@@ -1607,23 +1607,23 @@ typedef enum {
 
 /* Hybrid Logical Clock (HLC) representation */
 typedef struct {
-    uint64_t wall_clock;
-    uint64_t lamport_clock;
-} hlc_t;
+    uint64_t wall_time;
+    uint64_t logical;
+} hlc;
 
 /* Compare two hybrid logical clocks. Returns:
  * 1 if a > b,
  * -1 if a < b,
  * 0 if a == b 
  *
- * This first checks wall_clock time
- * and falls back to lamport to break ties.
+ * This first checks wall_time
+ * and falls back to logical to break ties.
  */
-static int hlcCompare(const hlc_t *a, const hlc_t *b) {
-    if (a->wall_clock > b->wall_clock) return 1;
-    if (a->wall_clock < b->wall_clock) return -1;
-    if (a->lamport_clock > b->lamport_clock) return 1;
-    if (a->lamport_clock < b->lamport_clock) return -1;
+static inline int hlcCompare(const hlc *a, const hlc *b) {
+    if (a->wall_time > b->wall_time) return 1;
+    if (a->wall_time < b->wall_time) return -1;
+    if (a->logical > b->logical) return 1;
+    if (a->logical < b->logical) return -1;
     return 0;
 }
 
@@ -1688,7 +1688,7 @@ typedef struct rdbSaveInfo {
     sds *repl_runtime_pending_entries;    /* Pending entries encoded as "<runtime-idx:u64><replay-id:u64><resp-frame-bytes...>". */
     int rreplay_seen_count;               /* Number of persisted dedupe keys from RREPLAY. */
     sds *rreplay_seen_entries;            /* Dedupe keys encoded as "<origin-uuid>:<replay-id>". */
-    hlc_t hlc_clock;                      /* Global HLC logical clock persisted in RDB AUX. */
+    hlc hlc_clock;                      /* Global HLC logical clock persisted in RDB AUX. */
     dict *hlc_key_clock;                  /* Encoded key clock map loaded from RDB AUX. */
 } rdbSaveInfo;
 
@@ -2227,9 +2227,9 @@ struct valkeyServer {
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
     long long rreplay_pending_max_entries; /* Per-upstream pending replay frame queue cap. */
-    dict *hlc_key_clock; /* Key-level LWW clock map. Key: binary(dbid)+key-bytes, Value: hlc_t*. */
+    dict *hlc_key_clock; /* Key-level LWW clock map. Key: binary(dbid)+key-bytes, Value: hlc*. */
     dict *hlc_key_tie_break; /* Deterministic tie-break map. Key: binary(dbid)+key-bytes, Value: zstrdup("<uuid>:<id>"). */
-    hlc_t hlc_clock;  /* Hybrid logical clock */
+    hlc hlc_clock;  /* Hybrid logical clock */
     long long hlc_rdb_clock_max_entries; /* Configurable cap for persisted HLC key clocks in RDB AUX. */
     unsigned long long hlc_rdb_clock_entries_dropped_last_save; /* Last RDB save: valid HLC entries omitted by cap. */
     char *primary_user;     /* AUTH with this user and primary_auth with primary */
@@ -3297,8 +3297,8 @@ void replicationApplyRdbConfiguredUpstreams(const rdbSaveInfo *rsi);
 void replicationApplyRdbUpstreamRuntimeState(const rdbSaveInfo *rsi);
 void replicationApplyRdbRReplaySeen(const rdbSaveInfo *rsi);
 void replicationApplyRdbHLCState(const rdbSaveInfo *rsi);
-hlc_t replicationHLCGetKeyClock(int dbid, robj *key);
-void replicationHLCSetKeyClock(int dbid, robj *key, hlc_t ts);
+hlc replicationHLCGetKeyClock(int dbid, robj *key);
+void replicationHLCSetKeyClock(int dbid, robj *key, hlc ts);
 void refreshGoodReplicasCount(void);
 int checkGoodReplicasStatus(void);
 void processClientsWaitingReplicas(void);
@@ -4396,7 +4396,7 @@ int iAmPrimary(void);
 
 /* Temp mapping while transitioning 
  * TODO: Remove once transition is over. */
-#define mvcc_clock hlc_clock.wall_clock
+#define mvcc_clock hlc_clock.wall_time
 #define mvcc_key_clock hlc_key_clock
 #define mvcc_key_tie_break hlc_key_tie_break
 #define mvcc_rdb_clock_max_entries hlc_rdb_clock_max_entries

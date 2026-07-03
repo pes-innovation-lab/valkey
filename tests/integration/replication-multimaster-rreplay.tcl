@@ -118,7 +118,7 @@ start_server {tags {"repl external:skip"}} {
             set k1_payload [$node0 dump mm:mset:tmp1]
             set k2_payload [$node0 dump mm:mset:tmp2]
             $node0 del mm:mset:tmp1 mm:mset:tmp2 mm:mset:k1 mm:mset:k2
-            set base_clock [s -1 mvcc_clock]
+            set base_clock [s -1 hlc_clock_wall]
             set k1_ts [expr {$base_clock + 10}]
             set k2_ts [expr {$base_clock + 1000}]
             set replay_ts [expr {$base_clock + 500}]
@@ -154,11 +154,11 @@ start_server {tags {"repl external:skip"}} {
             assert_equal 1 [s 0 active_upstream_runtime_links]
             assert {[s 0 upstream_runtime_replay_tx_frames] >= 1}
             assert {[s 0 upstream_runtime_replay_backlog] >= 0}
-            assert {[s -1 mvcc_clock] >= 1}
-            assert {[s -1 mvcc_key_clock_entries] >= 1}
+            assert {[s -1 hlc_clock_wall] >= 1}
+            assert {[s -1 hlc_key_clock_entries] >= 1}
             assert {[s -1 rreplay_dedupe_entries] >= 1}
-            assert {[s -1 mvcc_rdb_clock_max_entries] >= 0}
-            assert {[s -1 mvcc_rdb_clock_entries_dropped_last_save] >= 0}
+            assert {[s -1 hlc_rdb_clock_max_entries] >= 0}
+            assert {[s -1 hlc_rdb_clock_entries_dropped_last_save] >= 0}
         }
 
         test {RDB persists RREPLAY dedupe metadata} {
@@ -277,8 +277,8 @@ start_server {tags {"repl external:skip"}} {
             }
 
             $node0 save
-            assert_equal 5 [s -1 mvcc_rdb_clock_max_entries]
-            assert {[s -1 mvcc_rdb_clock_entries_dropped_last_save] >= 3}
+            assert_equal 5 [s -1 hlc_rdb_clock_max_entries]
+            assert {[s -1 hlc_rdb_clock_entries_dropped_last_save] >= 3}
 
             restart_server -1 true false
             set node0 [srv -1 client]
