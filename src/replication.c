@@ -1218,9 +1218,7 @@ void replicationApplyRdbHLCState(const rdbSaveInfo *rsi) {
     server.hlc_clock.logical = 0;
 
     if (rsi == NULL) return;
-    if (hlcCompare(&rsi->hlc_clock, &server.hlc_clock) > 0) {
-        server.hlc_clock = rsi->hlc_clock;
-    }
+    server.hlc_clock = rsi->hlc_clock;
     if (rsi->hlc_key_clock == NULL) return;
 
     dictIterator di;
@@ -3558,78 +3556,62 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    int payload_start = 4;
-    hlc hlc_ts = {0, 0};
-    if (c->argc >= 6) {
-        robj *decoded = getDecodedObject(c->argv[4]); /* Convert to str to perform hyphen check*/
-        char *str = objectGetVal(decoded);
-        char *hyphen = strchr(str, '-');
-        uint64_t wall = 0;
-        uint64_t lamport = 0;
-        int parsed = 0;
+    if (c->argc < 6) {
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp or payload command");
+        freeClientAsync(c);
+        return;
+    }
 
-        if (hyphen) {
-            /* Parse hyphenated format: <wall_time>-<logical> without modifying string in-place */
-            char *endptr1 = NULL;
-            char *endptr2 = NULL;
-            unsigned long long wall_val = strtoull(str, &endptr1, 10);
-            unsigned long long lamport_val = strtoull(hyphen + 1, &endptr2, 10);
-            if (endptr1 == hyphen && endptr1 != str && endptr2 != (hyphen + 1) && *endptr2 == '\0') {
-                wall = wall_val;
-                lamport = lamport_val;
-                parsed = (wall > 0);
-            }
-        } else {
-            /* Parse legacy plain integer format for backward compatibility */
-            char *endptr = NULL;
-            unsigned long long wall_val = strtoull(str, &endptr, 10); /* Convert str back to ull */
-            if (endptr != str && *endptr == '\0') {
-                wall = wall_val;
-                lamport = 0;
-                parsed = (wall > 0);
-            }
-        }
+    robj *decoded = getDecodedObject(c->argv[4]); /* Convert to str to perform hyphen check*/
+    char *str = objectGetVal(decoded);
+    char *hyphen = strchr(str, '-');
+    if (!hyphen) {
         decrRefCount(decoded);
-
-        if (parsed) {
-            hlc_ts.wall_time = wall;
-            hlc_ts.logical = lamport;
-            payload_start = 5; /* Start index of payload in the command */
-
-            /* HLC receive/merge algorithm:
-             * 1. Find max wall clock time among physical time, local wall clock, and remote wall clock.
-             * 2. Adjust Lamport logical counter based on which clocks match the maximum wall clock.
-             * 3. Update the global clock. */
-             
-            uint64_t physical_time = ustime();
-            uint64_t max_wall = server.hlc_clock.wall_time;
-            if (physical_time > max_wall) max_wall = physical_time;
-            if (hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
-
-            if (max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare Lamport ts */
-                server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
-            } else if (max_wall == server.hlc_clock.wall_time) {
-                server.hlc_clock.logical++;
-            } else if (max_wall == hlc_ts.wall_time) {
-                server.hlc_clock.logical = hlc_ts.logical + 1;
-            } else {
-                server.hlc_clock.logical = 0;
-            }
-            server.hlc_clock.wall_time = max_wall;
-        }
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC logical separator");
+        freeClientAsync(c);
+        return;
     }
 
-    int payload_argc = c->argc - payload_start;
-    robj **payload_argv = c->argv + payload_start;
+    char *endptr1 = NULL;
+    char *endptr2 = NULL;
+    unsigned long long wall_val = strtoull(str, &endptr1, 10);
+    unsigned long long lamport_val = strtoull(hyphen + 1, &endptr2, 10);
+    if (endptr1 != hyphen || endptr1 == str || endptr2 == (hyphen + 1) || *endptr2 != '\0' || wall_val == 0) {
+        decrRefCount(decoded);
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: bad HLC timestamp format");
+        freeClientAsync(c);
+        return;
+    }
+
+    hlc hlc_ts;
+    hlc_ts.wall_time = wall_val;
+    hlc_ts.logical = lamport_val;
+    decrRefCount(decoded);
+
+    /* HLC receive/merge algorithm:
+     * 1. Find max wall clock time among physical time, local wall clock, and remote wall clock.
+     * 2. Adjust Lamport logical counter based on which clocks match the maximum wall clock.
+     * 3. Update the global clock. */
+     
+    uint64_t physical_time = ustime();
+    uint64_t max_wall = server.hlc_clock.wall_time;
+    if (physical_time > max_wall) max_wall = physical_time;
+    if (hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
+
+    if (max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare Lamport ts */
+        server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
+    } else if (max_wall == server.hlc_clock.wall_time) {
+        server.hlc_clock.logical++;
+    } else if (max_wall == hlc_ts.wall_time) {
+        server.hlc_clock.logical = hlc_ts.logical + 1;
+    } else {
+        server.hlc_clock.logical = 0;
+    }
+    server.hlc_clock.wall_time = max_wall;
+
+    int payload_argc = c->argc - 5;
+    robj **payload_argv = c->argv + 5;
     struct serverCommand *payload_cmd = lookupCommand(payload_argv, payload_argc);
-    if (!payload_cmd && payload_start == 5) {
-        /* Backward compatibility: accept older frame format without mvcc-ts. */
-        hlc_ts = (hlc){0, 0};
-        payload_start = 4;
-        payload_argc = c->argc - payload_start;
-        payload_argv = c->argv + payload_start;
-        payload_cmd = lookupCommand(payload_argv, payload_argc);
-    }
     if (!payload_cmd) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: unknown command '%s'",
                   (char *)objectGetVal(payload_argv[0]));
