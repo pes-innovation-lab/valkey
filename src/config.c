@@ -3498,6 +3498,10 @@ standardConfig static_configs[] = {
     /* hlc-rdb-clock-max-entries controls the maximum number of persisted HLC key clocks in RDB AUX.
      * "mvcc-rdb-clock-max-entries" is configured as an alias for backward compatibility. */
     createLongLongConfig("hlc-rdb-clock-max-entries", "mvcc-rdb-clock-max-entries", MODIFIABLE_CONFIG, 0, LLONG_MAX, server.hlc_rdb_clock_max_entries, CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES, INTEGER_CONFIG, NULL, NULL),
+    /* hlc-max-clock-drift is the maximum tolerated drift (in microseconds) between the HLC wall
+     * time and the local physical clock. 
+     * Set to 0 to disable checks. Default: 500 ms. */
+    createLongLongConfig("hlc-max-clock-drift", NULL, MODIFIABLE_CONFIG, 0, LLONG_MAX, server.hlc_max_clock_drift, CONFIG_DEFAULT_HLC_MAX_CLOCK_DRIFT_USEC, INTEGER_CONFIG, NULL, NULL),
     createLongLongConfig("cluster-manual-failover-timeout", NULL, MODIFIABLE_CONFIG, 1, INT_MAX, server.cluster_mf_timeout, 5000, INTEGER_CONFIG, NULL, NULL),
 
     /* Unsigned Long Long configs */

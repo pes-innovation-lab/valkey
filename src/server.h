@@ -154,6 +154,7 @@ struct ValkeyModule;
 #define CONFIG_REPL_BACKLOG_MIN_SIZE (1024 * 16) /* 16k */
 #define CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES 200000
 #define CONFIG_DEFAULT_RREPLAY_PENDING_MAX_ENTRIES 50000
+#define CONFIG_DEFAULT_HLC_MAX_CLOCK_DRIFT_USEC 500000 /* Default HLC drift tolerance: 500 ms in microseconds. https://cse.buffalo.edu/tech-reports/2014-04.pdf  */
 #define CONFIG_BGSAVE_RETRY_DELAY 5              /* Wait a few secs before trying again. */
 #define CONFIG_DEFAULT_PID_FILE "/var/run/valkey.pid"
 #define CONFIG_DEFAULT_BINDADDR_COUNT 2
@@ -2232,6 +2233,7 @@ struct valkeyServer {
     hlc hlc_clock;  /* Hybrid logical clock */
     long long hlc_rdb_clock_max_entries; /* Configurable cap for persisted HLC key clocks in RDB AUX. */
     unsigned long long hlc_rdb_clock_entries_dropped_last_save; /* Last RDB save: valid HLC entries omitted by cap. */
+    long long hlc_max_clock_drift; /* Max tolerated microseconds between HLC wall time and physical time (0 = disabled). */
     char *primary_user;     /* AUTH with this user and primary_auth with primary */
     sds primary_auth;       /* AUTH with this password with primary */
     char *primary_host;     /* Hostname of primary */

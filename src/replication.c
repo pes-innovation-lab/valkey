@@ -1218,7 +1218,23 @@ void replicationApplyRdbHLCState(const rdbSaveInfo *rsi) {
     server.hlc_clock.logical = 0;
 
     if (rsi == NULL) return;
-    server.hlc_clock = rsi->hlc_clock;
+    /* self-stabilization: guard against restoring a persisted HLC
+     * that is wildly ahead of the current physical clock (e.g., saved while a
+     * node had a bad clock). Resetting here prevents one stale RDB from
+     * inflating the cluster HLC on restart.
+     * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    if (server.hlc_max_clock_drift > 0 && rsi->hlc_clock.wall_time != 0) {
+        uint64_t pt = ustime();
+        if (rsi->hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
+            serverLog(LL_WARNING,"RDB HLC wall time (%.3f ms ahead of physical clock) exceeds hlc-max-clock-drift; resetting to physical time.", (double)(rsi->hlc_clock.wall_time - pt) / 1000.0);
+            server.hlc_clock.wall_time = pt;
+            server.hlc_clock.logical = 0;
+        } else {
+            server.hlc_clock = rsi->hlc_clock;
+        }
+    } else {
+        server.hlc_clock = rsi->hlc_clock;
+    }
     if (rsi->hlc_key_clock == NULL) return;
 
     dictIterator di;
@@ -1333,6 +1349,16 @@ void replicationApplyRdbRReplaySeen(const rdbSaveInfo *rsi) {
 
 static hlc hlcNextLocalClock(void) {
     uint64_t pt = ustime();
+    /* self-stabilization: if the HLC wall time has drifted too far
+     * ahead of physical time, reset it back to pt and zero the logical counter
+     * rather than letting the divergence compound across the cluster.
+     * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    if (server.hlc_max_clock_drift > 0 &&
+        server.hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
+        serverLog(LL_WARNING,"HLC wall time drifted %.3f ms ahead of physical clock; resetting to physical time (hlc self-stabilization).",(double)(server.hlc_clock.wall_time - pt) / 1000.0);
+        server.hlc_clock.wall_time = pt;
+        server.hlc_clock.logical = 0;
+    }
     if (pt > server.hlc_clock.wall_time) {
         server.hlc_clock.wall_time = pt;
         server.hlc_clock.logical = 0;
@@ -3592,17 +3618,34 @@ void rreplayCommand(client *c) {
      * 1. Find max wall clock time among physical time, local wall clock, and remote wall clock.
      * 2. Adjust Lamport logical counter based on which clocks match the maximum wall clock.
      * 3. Update the global clock. */
-     
+
     uint64_t physical_time = ustime();
+
+    /* masking of synchronization errors: if the sender's HLC wall
+     * time exceeds our physical time by more than the configured drift tolerance,
+     * ignore the remote wall time entirely. This prevents a node with a runaway
+     * or corrupted clock from polluting the cluster's HLC.
+     * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    int hlc_ts_ignored = 0;
+    if (server.hlc_max_clock_drift > 0 &&
+        hlc_ts.wall_time > physical_time + (uint64_t)server.hlc_max_clock_drift) {
+        serverLog(LL_WARNING,"Ignoring RREPLAY HLC timestamp (wall=%llu logical=%llu): %.3f ms ahead of local physical clock (drift tolerance %.3f ms).",
+                  (unsigned long long)hlc_ts.wall_time,
+                  (unsigned long long)hlc_ts.logical,
+                  (double)(hlc_ts.wall_time - physical_time) / 1000.0,
+                  (double)server.hlc_max_clock_drift / 1000.0);
+        hlc_ts_ignored = 1;
+    }
+
     uint64_t max_wall = server.hlc_clock.wall_time;
     if (physical_time > max_wall) max_wall = physical_time;
-    if (hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
+    if (!hlc_ts_ignored && hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
 
-    if (max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare Lamport ts */
+    if (!hlc_ts_ignored && max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare Lamport ts */
         server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
     } else if (max_wall == server.hlc_clock.wall_time) {
         server.hlc_clock.logical++;
-    } else if (max_wall == hlc_ts.wall_time) {
+    } else if (!hlc_ts_ignored && max_wall == hlc_ts.wall_time) {
         server.hlc_clock.logical = hlc_ts.logical + 1;
     } else {
         server.hlc_clock.logical = 0;
