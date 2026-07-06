@@ -1350,12 +1350,13 @@ static hlc hlcNextLocalClock(void) {
         serverLog(LL_WARNING, "HLC wall time drifted %.3f ms ahead of physical clock; resetting to physical time (hlc self-stabilization).", (double)(server.hlc_clock.wall_time - pt) / 1000.0);
         server.hlc_clock.wall_time = pt;
         server.hlc_clock.logical = 0;
-    }
-    if (pt > server.hlc_clock.wall_time) {
-        server.hlc_clock.wall_time = pt;
-        server.hlc_clock.logical = 0;
-    } else { /* Clock delta is negative, increment logical */
-        server.hlc_clock.logical++;
+    } else {
+        if (pt > server.hlc_clock.wall_time) {
+            server.hlc_clock.wall_time = pt;
+            server.hlc_clock.logical = 0;
+        } else { /* Clock delta is negative or equal, increment logical counter */
+            server.hlc_clock.logical++;
+        }
     }
     return server.hlc_clock;
 }
