@@ -99,17 +99,17 @@ start_server {tags {"repl external:skip"}} {
             assert_equal {} [$node0 get mm:rmw:raw]
         }
 
-        test {MVCCRESTORE enforces stale protection} {
-            $node1 set mm:mvcc base
-            set payload [$node1 dump mm:mvcc]
-            $node1 mvccrestore mm:mvcc 0 $payload 100 replace
-            assert_equal "base" [$node1 get mm:mvcc]
+        test {HLCRESTORE enforces stale protection} {
+            $node1 set mm:hlc base
+            set payload [$node1 dump mm:hlc]
+            $node1 hlcrestore mm:hlc 0 $payload 100 replace
+            assert_equal "base" [$node1 get mm:hlc]
 
-            $node1 set mm:mvcc newer
-            set payload_old [$node1 dump mm:mvcc]
-            $node1 set mm:mvcc latest
-            $node1 mvccrestore mm:mvcc 0 $payload_old 50 replace
-            assert_equal "latest" [$node1 get mm:mvcc]
+            $node1 set mm:hlc newer
+            set payload_old [$node1 dump mm:hlc]
+            $node1 set mm:hlc latest
+            $node1 hlcrestore mm:hlc 0 $payload_old 50 replace
+            assert_equal "latest" [$node1 get mm:hlc]
         }
 
         test {RREPLAY MSET applies fresh keys without dropping the full command} {
@@ -125,8 +125,8 @@ start_server {tags {"repl external:skip"}} {
             set client_info [$node0 client info]
             set dbid 0
             regexp {db=([0-9]+)} $client_info _ dbid
-            $node0 mvccrestore mm:mset:k1 0 $k1_payload $k1_ts replace
-            $node0 mvccrestore mm:mset:k2 0 $k2_payload $k2_ts replace
+            $node0 hlcrestore mm:mset:k1 0 $k1_payload $k1_ts replace
+            $node0 hlcrestore mm:mset:k2 0 $k2_payload $k2_ts replace
 
             assert_equal OK [$node0 replconf capa rreplay-peer]
             assert_equal OK [$node0 replconf uuid 1111111111111111111111111111111111111111]
@@ -190,9 +190,9 @@ start_server {tags {"repl external:skip"}} {
         test {RDB persists configured upstream metadata} {
             set replay_tx_before [s 0 upstream_runtime_replay_tx_frames]
             set replay_ack_before [s 0 upstream_runtime_replay_ack_frames]
-            $node1 set mm:mvcc-persist seed
-            set mvcc_payload [$node1 dump mm:mvcc-persist]
-            $node1 mvccrestore mm:mvcc-persist 0 $mvcc_payload 200 replace
+            $node1 set mm:hlc-persist seed
+            set hlc_payload [$node1 dump mm:hlc-persist]
+            $node1 hlcrestore mm:hlc-persist 0 $hlc_payload 200 replace
             $node1 save
             restart_server 0 true false
 
@@ -244,21 +244,21 @@ start_server {tags {"repl external:skip"}} {
 
             assert {[s 0 upstream_runtime_replay_tx_frames] >= $replay_tx_before}
             assert {[s 0 upstream_runtime_replay_ack_frames] >= $replay_ack_before}
-            $node1 mvccrestore mm:mvcc-persist 0 $mvcc_payload 150 replace
-            assert_equal "seed" [$node1 get mm:mvcc-persist]
+            $node1 hlcrestore mm:hlc-persist 0 $hlc_payload 150 replace
+            assert_equal "seed" [$node1 get mm:hlc-persist]
         }
 
-        test {RDB MVCC cap persists newest key clocks first} {
+        test {RDB HLC cap persists newest key clocks first} {
             $node1 replicaof $node0_host $node0_port
             wait_for_condition 100 100 {
                 [s 0 master_link_status] eq {up}
             } else {
-                fail "Replica link was not established before MVCC cap test"
+                fail "Replica link was not established before HLC cap test"
             }
 
-            $node0 config set mvcc-rdb-clock-max-entries 5
+            $node0 config set hlc-rdb-clock-max-entries 5
             for {set i 1} {$i <= 8} {incr i} {
-                set key "mm:mvcc-cap:$i"
+                set key "mm:hlc-cap:$i"
                 $node1 set $key "seed-$i"
                 wait_for_condition 100 50 {
                     [$node0 get $key] eq "seed-$i"
@@ -288,26 +288,26 @@ start_server {tags {"repl external:skip"}} {
             wait_for_condition 100 100 {
                 [s -1 loading] eq {0}
             } else {
-                fail "Primary restart after MVCC cap save did not finish loading"
+                fail "Primary restart after HLC cap save did not finish loading"
             }
 
             $node1 replicaof $node0_host $node0_port
             wait_for_condition 100 100 {
                 [s 0 master_link_status] eq {up}
             } else {
-                fail "Replica link was not re-established after MVCC cap restart"
+                fail "Replica link was not re-established after HLC cap restart"
             }
 
             for {set i 1} {$i <= 8} {incr i} {
-                set key "mm:mvcc-cap:$i"
-                $node0 mvccrestore $key 0 $old_payload($i) 1 replace
+                set key "mm:hlc-cap:$i"
+                $node0 hlcrestore $key 0 $old_payload($i) 1 replace
             }
 
             for {set i 1} {$i <= 3} {incr i} {
-                assert_equal "seed-$i" [$node0 get "mm:mvcc-cap:$i"]
+                assert_equal "seed-$i" [$node0 get "mm:hlc-cap:$i"]
             }
             for {set i 4} {$i <= 8} {incr i} {
-                assert_equal "final-$i" [$node0 get "mm:mvcc-cap:$i"]
+                assert_equal "final-$i" [$node0 get "mm:hlc-cap:$i"]
             }
         }
 

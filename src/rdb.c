@@ -1557,17 +1557,17 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
                       RDB_REPL_RUNTIME_PENDING_MAX);
         }
 
-        unsigned long mvcc_count = server.hlc_key_clock ? dictSize(server.hlc_key_clock) : 0;
-        if (rdbSaveAuxFieldStrInt(rdb, "hlc-keys-count", mvcc_count) == -1) return -1;
+        unsigned long hlc_count = server.hlc_key_clock ? dictSize(server.hlc_key_clock) : 0;
+        if (rdbSaveAuxFieldStrInt(rdb, "hlc-keys-count", hlc_count) == -1) return -1;
         server.hlc_rdb_clock_entries_dropped_last_save = 0;
-        if (mvcc_count) {
+        if (hlc_count) {
             unsigned long cap = 0;
             if (server.hlc_rdb_clock_max_entries > 0) {
                 unsigned long long configured_cap = (unsigned long long)server.hlc_rdb_clock_max_entries;
                 cap = configured_cap > ULONG_MAX ? ULONG_MAX : (unsigned long)configured_cap;
             }
 
-            unsigned long heap_cap = min(cap, mvcc_count);
+            unsigned long heap_cap = min(cap, hlc_count);
             hlcPersistEntry *heap = heap_cap ? zmalloc(sizeof(*heap) * heap_cap) : NULL;
             unsigned long heap_size = 0;
             unsigned long valid_entries = 0;
@@ -1577,13 +1577,13 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
             dictEntry *de;
 
             while ((de = dictNext(&di)) != NULL) {
-                sds mvcc_key = dictGetKey(de);
+                sds hlc_key = dictGetKey(de);
                 hlc *clockp = dictGetVal(de);
-                if (mvcc_key == NULL || clockp == NULL || (clockp->wall_time == 0 && clockp->logical == 0)) continue;
+                if (hlc_key == NULL || clockp == NULL || (clockp->wall_time == 0 && clockp->logical == 0)) continue;
                 valid_entries++;
 
                 hlcPersistEntry candidate = {
-                    .key = mvcc_key,
+                    .key = hlc_key,
                     .ts = *clockp,
                 };
                 hlcPersistHeapPushOrReplace(heap, &heap_size, heap_cap, candidate);
@@ -1593,13 +1593,13 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
                 qsort(heap, heap_size, sizeof(*heap), hlcPersistEntrySortDesc);
             }
 
-            for (unsigned long mvcc_id = 0; mvcc_id < heap_size; mvcc_id++) {
-                uint64_t wall_be = htonu64(heap[mvcc_id].ts.wall_time);
-                uint64_t logical_be = htonu64(heap[mvcc_id].ts.logical);
-                sds auxkey = sdscatprintf(sdsempty(), "hlc-key-%lu", mvcc_id);
+            for (unsigned long hlc_id = 0; hlc_id < heap_size; hlc_id++) {
+                uint64_t wall_be = htonu64(heap[hlc_id].ts.wall_time);
+                uint64_t logical_be = htonu64(heap[hlc_id].ts.logical);
+                sds auxkey = sdscatprintf(sdsempty(), "hlc-key-%lu", hlc_id);
                 sds auxval = sdsnewlen(&wall_be, sizeof(wall_be));
                 auxval = sdscatlen(auxval, &logical_be, sizeof(logical_be));
-                auxval = sdscatlen(auxval, heap[mvcc_id].key, sdslen(heap[mvcc_id].key));
+                auxval = sdscatlen(auxval, heap[hlc_id].key, sdslen(heap[hlc_id].key));
                 int rc = rdbSaveAuxField(rdb, auxkey, sdslen(auxkey), auxval, sdslen(auxval));
                 sdsfree(auxkey);
                 sdsfree(auxval);
@@ -3661,14 +3661,6 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                     long long val = strtoll(objectGetVal(auxval), NULL, 10);
                     if (val >= 0) rsi->hlc_clock.logical = (uint64_t)val;
                 }
-            } else if (!strcasecmp(objectGetVal(auxkey), "mvcc-clock")) {
-                if (rsi) {
-                    long long val = strtoll(objectGetVal(auxval), NULL, 10);
-                    if (val > 0) {
-                        rsi->hlc_clock.wall_time = (uint64_t)val;
-                        rsi->hlc_clock.logical = 0;
-                    }
-                }
             } else if (!strcasecmp(objectGetVal(auxkey), "repl-masters-count")) {
                 if (rsi) {
                     long long count = strtoll(objectGetVal(auxval), NULL, 10);
@@ -3690,9 +3682,8 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                         rdbSaveInfoEnsureRuntimePendingCapacity(rsi, (int)count);
                     }
                 }
-            } else if (!strcasecmp(objectGetVal(auxkey), "hlc-keys-count") ||
-                       !strcasecmp(objectGetVal(auxkey), "mvcc-keys-count")) {
-                /* Size hint only; actual entries are loaded from hlc-key-N or mvcc-key-N AUX fields. */
+            } else if (!strcasecmp(objectGetVal(auxkey), "hlc-keys-count")) {
+                /* Size hint only; actual entries are loaded from hlc-key-N AUX fields. */
             } else if (!strcasecmp(objectGetVal(auxkey), "rreplay-seen-count")) {
                 if (rsi) {
                     long long count = strtoll(objectGetVal(auxval), NULL, 10);
@@ -3778,39 +3769,6 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                             if (existing && hlcCompare(&ts, existing) > 0) *existing = ts;
                         }
                         sdsfree(hlc_key);
-                        zfree(clockp);
-                    }
-                }
-            } else if (!strncasecmp(objectGetVal(auxkey), "mvcc-key-", 9)) {
-                if (rsi) {
-                    sds raw = objectGetVal(auxval);
-                    if (sdslen(raw) < sizeof(uint64_t)) {
-                        decrRefCount(auxkey);
-                        decrRefCount(auxval);
-                        goto eoferr;
-                    }
-                    if (rdbSaveInfoEnsureHLCClockMap(rsi) != C_OK) {
-                        decrRefCount(auxkey);
-                        decrRefCount(auxval);
-                        goto eoferr;
-                    }
-
-                    uint64_t ts_be = 0;
-                    memcpy(&ts_be, raw, sizeof(ts_be));
-                    uint64_t ts = ntohu64(ts_be);
-                    hlc hlc_ts = {ts, 0};
-                    if (hlcCompare(&hlc_ts, &rsi->hlc_clock) > 0) rsi->hlc_clock = hlc_ts;
-
-                    sds mvcc_key = sdsnewlen(raw + sizeof(uint64_t), sdslen(raw) - sizeof(uint64_t));
-                    hlc *clockp = zmalloc(sizeof(*clockp));
-                    *clockp = hlc_ts;
-                    if (dictAdd(rsi->hlc_key_clock, mvcc_key, clockp) != DICT_OK) {
-                        dictEntry *de = dictFind(rsi->hlc_key_clock, mvcc_key);
-                        if (de) {
-                            hlc *existing = dictGetVal(de);
-                            if (existing && hlcCompare(&hlc_ts, existing) > 0) *existing = hlc_ts;
-                        }
-                        sdsfree(mvcc_key);
                         zfree(clockp);
                     }
                 }

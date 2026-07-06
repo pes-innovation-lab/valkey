@@ -199,27 +199,27 @@ void dumpCommand(client *c) {
     return;
 }
 
-static void restoreGenericCommand(client *c, int use_mvcc_ts) {
+static void restoreGenericCommand(client *c, int use_hlc_ts) {
     long long ttl, lfu_freq = -1, lru_idle = -1;
     uint16_t rdbver = 0;
     rio payload;
     int j, type, replace = 0, absttl = 0;
-    uint64_t mvcc_ts = 0;
+    uint64_t hlc_ts = 0;
     robj *obj;
     int options_start = 4;
 
-    if (use_mvcc_ts) {
-        long long mvcc_ts_ll = 0;
-        if (getLongLongFromObjectOrReply(c, c->argv[4], &mvcc_ts_ll, NULL) != C_OK) return;
-        if (mvcc_ts_ll <= 0) {
-            addReplyError(c, "Invalid MVCC timestamp, must be > 0");
+    if (use_hlc_ts) {
+        long long hlc_ts_ll = 0;
+        if (getLongLongFromObjectOrReply(c, c->argv[4], &hlc_ts_ll, NULL) != C_OK) return;
+        if (hlc_ts_ll <= 0) {
+            addReplyError(c, "Invalid HLC timestamp, must be > 0");
             return;
         }
-        mvcc_ts = mvcc_ts_ll;
+        hlc_ts = hlc_ts_ll;
         options_start = 5;
 
         hlc current_clock = replicationHLCGetKeyClock(c->db->id, c->argv[1]);
-        hlc restore_clock = {mvcc_ts, 0};
+        hlc restore_clock = {hlc_ts, 0};
         if (hlcCompare(&restore_clock, &current_clock) < 0) {
             addReply(c, shared.ok);
             return;
@@ -329,8 +329,8 @@ static void restoreGenericCommand(client *c, int use_mvcc_ts) {
     objectSetLRUOrLFU(obj, lfu_freq, lru_idle);
     signalModifiedKey(c, c->db, key);
     notifyKeyspaceEvent(NOTIFY_GENERIC, "restore", key, c->db->id);
-    if (use_mvcc_ts) {
-        hlc restore_clock = {mvcc_ts, 0};
+    if (use_hlc_ts) {
+        hlc restore_clock = {hlc_ts, 0};
         replicationHLCSetKeyClock(c->db->id, key, restore_clock);
     }
     addReply(c, shared.ok);
@@ -342,9 +342,9 @@ void restoreCommand(client *c) {
     restoreGenericCommand(c, 0);
 }
 
-/* MVCCRESTORE key ttl serialized-value mvcc-ts [REPLACE] [ABSTTL] [IDLETIME seconds] [FREQ frequency]
- * Restore variant that updates key-level MVCC clock used by active-active LWW replay. */
-void mvccrestoreCommand(client *c) {
+/* HLCRESTORE key ttl serialized-value hlc-ts [REPLACE] [ABSTTL] [IDLETIME seconds] [FREQ frequency]
+ * Restore variant that updates key-level HLC clock used by active-active LWW replay. */
+void hlcrestoreCommand(client *c) {
     restoreGenericCommand(c, 1);
 }
 /* MIGRATE socket cache implementation.

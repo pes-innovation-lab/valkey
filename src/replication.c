@@ -1589,7 +1589,7 @@ static int rreplaySetUsesUnsupportedTtlOptions(robj **argv, int argc) {
     return 0;
 }
 
-/* Raw read-modify-write commands are not replay-safe with command-level MVCC.
+/* Raw read-modify-write commands are not replay-safe with command-level HLC/LWW.
  * Incoming replay frames with these commands are rejected. Local writes are
  * canonicalized to deterministic absolute writes before wrapping in RREPLAY. */
 static int rreplayCommandIsRiskyRmw(struct serverCommand *cmd) {
@@ -2432,7 +2432,7 @@ static void forwardRawRReplayFrameToUpstreams(robj **argv, int argc, client *exc
 /* Encapsulate a locally generated command and send it upstream to the
  * connected primary as an active-active replay frame.
  *
- * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <mvcc-ts> <command> [arg ...] */
+ * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <command> [arg ...] */
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     if (dictid < 0 || argv == NULL || argc <= 0) return;
 
@@ -3501,7 +3501,7 @@ void replconfCommand(client *c) {
     addReply(c, shared.ok);
 }
 
-/* RREPLAY <origin-uuid> <dbid> <replay-id> [<mvcc-ts>] <command> [arg ...]
+/* RREPLAY <origin-uuid> <dbid> <replay-id> [<hlc-ts>] <command> [arg ...]
  * Internal active-active replay wrapper.
  *
  * Accepted from replication links and from internal multi-master peer links.

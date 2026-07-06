@@ -4230,7 +4230,7 @@ void clusterKeySlotCommand(client *c);
 void clusterSlotStatsCommand(client *c);
 void clusterscanCommand(client *c);
 void restoreCommand(client *c);
-void mvccrestoreCommand(client *c);
+void hlcrestoreCommand(client *c);
 void migrateCommand(client *c);
 void askingCommand(client *c);
 void readonlyCommand(client *c);
@@ -4395,7 +4395,5 @@ int iAmPrimary(void);
 
 #define STRINGIFY_(x) #x
 #define STRINGIFY(x) STRINGIFY_(x)
-
-
 
 #endif
