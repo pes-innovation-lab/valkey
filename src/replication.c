@@ -1374,16 +1374,6 @@ static sds hlcComposeKey(int dbid, robj *keyobj) {
     return key;
 }
 
-static hlc hlcGetKeyClock(int dbid, robj *keyobj) {
-    hlc zero = {0, 0};
-    if (server.hlc_key_clock == NULL || keyobj == NULL || dbid < 0) return zero;
-    sds key = hlcComposeKey(dbid, keyobj);
-    dictEntry *de = dictFind(server.hlc_key_clock, key);
-    sdsfree(key);
-    if (de == NULL) return zero;
-    hlc *clockp = dictGetVal(de);
-    return clockp ? *clockp : zero;
-}
 
 static char *hlcGetKeyTieBreak(int dbid, robj *keyobj) {
     if (server.hlc_key_tie_break == NULL || keyobj == NULL || dbid < 0) return NULL;
@@ -1394,8 +1384,15 @@ static char *hlcGetKeyTieBreak(int dbid, robj *keyobj) {
     return dictGetVal(de);
 }
 
-hlc replicationHLCGetKeyClock(int dbid, robj *key) {
-    return hlcGetKeyClock(dbid, key);
+hlc replicationHLCGetKeyClock(int dbid, robj *keyobj) {
+    hlc zero = {0, 0};
+    if (server.hlc_key_clock == NULL || keyobj == NULL || dbid < 0) return zero;
+    sds key = hlcComposeKey(dbid, keyobj);
+    dictEntry *de = dictFind(server.hlc_key_clock, key);
+    sdsfree(key);
+    if (de == NULL) return zero;
+    hlc *clockp = dictGetVal(de);
+    return clockp ? *clockp : zero;
 }
 
 static void hlcSetKeyTieBreak(int dbid, robj *keyobj, const char *tie_break) {
@@ -1446,7 +1443,7 @@ static void hlcSetKeyClock(int dbid, robj *keyobj, hlc ts) {
 
 void replicationHLCSetKeyClock(int dbid, robj *key, hlc ts) {
     if (ts.wall_time == 0 && ts.logical == 0) return;
-    hlc current = hlcGetKeyClock(dbid, key);
+    hlc current = replicationHLCGetKeyClock(dbid, key);
     if (hlcCompare(&ts, &current) < 0) ts = current;
     if (hlcCompare(&ts, &server.hlc_clock) > 0) server.hlc_clock = ts;
     hlcSetKeyClock(dbid, key, ts);
@@ -1469,7 +1466,7 @@ static int hlcCommandIsFresh(struct serverCommand *cmd, robj **argv, int argc, i
         int pos = result.keys[i].pos;
         if (pos < 0 || pos >= argc) continue;
 
-        hlc current = hlcGetKeyClock(dbid, argv[pos]);
+        hlc current = replicationHLCGetKeyClock(dbid, argv[pos]);
         int cmp = hlcCompare(&ts, &current);
         if (cmp < 0) {
             fresh = 0;
@@ -1491,7 +1488,7 @@ static int hlcCommandIsFresh(struct serverCommand *cmd, robj **argv, int argc, i
 static int hlcKeyIsFresh(int dbid, robj *keyobj, hlc ts, const char *tie_break) {
     if ((ts.wall_time == 0 && ts.logical == 0) || dbid < 0 || keyobj == NULL) return 1;
 
-    hlc current = hlcGetKeyClock(dbid, keyobj);
+    hlc current = replicationHLCGetKeyClock(dbid, keyobj);
     int cmp = hlcCompare(&ts, &current);
     if (cmp < 0) return 0;
     if (tie_break != NULL && cmp == 0) {
