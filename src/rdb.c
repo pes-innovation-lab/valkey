@@ -1271,23 +1271,11 @@ typedef struct hlcPersistEntry {
     hlc ts;
 } hlcPersistEntry;
 
-/* lexicographical comparison to break ties */
-static int hlcPersistKeyCompare(sds a, sds b) {
-    size_t alen = sdslen(a);
-    size_t blen = sdslen(b);
-    size_t minlen = min(alen, blen);
-    int cmp = memcmp(a, b, minlen);
-    if (cmp != 0) return cmp;
-    if (alen < blen) return -1;
-    if (alen > blen) return 1;
-    return 0;
-}
-
 /* Comparison by recency: older < newer. */
 static int hlcPersistEntryCompare(const hlcPersistEntry *a, const hlcPersistEntry *b) {
     int cmp = hlcCompare(&a->ts, &b->ts);
     if (cmp != 0) return cmp;
-    return hlcPersistKeyCompare(a->key, b->key);
+    return sdscmp(a->key, b->key);
 }
 
 static void hlcPersistEntrySwap(hlcPersistEntry *a, hlcPersistEntry *b) {
