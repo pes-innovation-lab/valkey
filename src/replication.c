@@ -987,10 +987,7 @@ static int parseUnsignedLongLongField(const char *field, unsigned long long *out
     return C_OK;
 }
 
-static int decodeRdbRuntimePendingEntry(sds encoded, unsigned long long *runtime_index,
-                                        unsigned long long *replay_id,
-                                        const unsigned char **frame_ptr,
-                                        size_t *frame_len) {
+static int decodeRdbRuntimePendingEntry(sds encoded, unsigned long long *runtime_index, unsigned long long *replay_id, const unsigned char **frame_ptr, size_t *frame_len) {
     if (encoded == NULL || runtime_index == NULL || replay_id == NULL || frame_ptr == NULL || frame_len == NULL) {
         return C_ERR;
     }
@@ -1007,12 +1004,7 @@ static int decodeRdbRuntimePendingEntry(sds encoded, unsigned long long *runtime
     return C_OK;
 }
 
-static int decodeRdbUpstreamRuntime(sds encoded, sds *host, int *port,
-                                    unsigned long long *last_sent,
-                                    unsigned long long *last_acked,
-                                    unsigned long long *tx_frames,
-                                    unsigned long long *rx_frames,
-                                    unsigned long long *ack_frames) {
+static int decodeRdbUpstreamRuntime(sds encoded, sds *host, int *port, unsigned long long *last_sent, unsigned long long *last_acked, unsigned long long *tx_frames, unsigned long long *rx_frames, unsigned long long *ack_frames) {
     if (encoded == NULL || host == NULL || port == NULL || last_sent == NULL ||
         last_acked == NULL || tx_frames == NULL || rx_frames == NULL || ack_frames == NULL) {
         return C_ERR;
@@ -1226,7 +1218,7 @@ void replicationApplyRdbHLCState(const rdbSaveInfo *rsi) {
     if (server.hlc_max_clock_drift > 0 && rsi->hlc_clock.wall_time != 0) {
         uint64_t pt = ustime();
         if (rsi->hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
-            serverLog(LL_WARNING,"RDB HLC wall time (%.3f ms ahead of physical clock) exceeds hlc-max-clock-drift; resetting to physical time.", (double)(rsi->hlc_clock.wall_time - pt) / 1000.0);
+            serverLog(LL_WARNING, "RDB HLC wall time (%.3f ms ahead of physical clock) exceeds hlc-max-clock-drift; resetting to physical time.", (double)(rsi->hlc_clock.wall_time - pt) / 1000.0);
             server.hlc_clock.wall_time = pt;
             server.hlc_clock.logical = 0;
         } else {
@@ -1355,14 +1347,14 @@ static hlc hlcNextLocalClock(void) {
      * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
     if (server.hlc_max_clock_drift > 0 &&
         server.hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
-        serverLog(LL_WARNING,"HLC wall time drifted %.3f ms ahead of physical clock; resetting to physical time (hlc self-stabilization).",(double)(server.hlc_clock.wall_time - pt) / 1000.0);
+        serverLog(LL_WARNING, "HLC wall time drifted %.3f ms ahead of physical clock; resetting to physical time (hlc self-stabilization).", (double)(server.hlc_clock.wall_time - pt) / 1000.0);
         server.hlc_clock.wall_time = pt;
         server.hlc_clock.logical = 0;
     }
     if (pt > server.hlc_clock.wall_time) {
         server.hlc_clock.wall_time = pt;
         server.hlc_clock.logical = 0;
-    } else { /* Clock delta is negative, increment lamport */
+    } else { /* Clock delta is negative, increment logical */
         server.hlc_clock.logical++;
     }
     return server.hlc_clock;
@@ -2485,10 +2477,10 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     frame_argv[3] = createStringObjectFromLongLong((long long)replay_id);
     /* Serialize HLC timestamp as <wall_time>-<logical> string representation */
     char hlc_buf[64];
-    int hlc_len = snprintf(hlc_buf, sizeof(hlc_buf), 
-    "%llu-%llu",
-    (unsigned long long)hlc_ts.wall_time, 
-    (unsigned long long)hlc_ts.logical);
+    int hlc_len = snprintf(hlc_buf, sizeof(hlc_buf),
+                           "%llu-%llu",
+                           (unsigned long long)hlc_ts.wall_time,
+                           (unsigned long long)hlc_ts.logical);
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
     for (int j = 0; j < payload_argc; j++) {
         frame_argv[j + 5] = payload_argv[j];
@@ -3601,7 +3593,7 @@ void rreplayCommand(client *c) {
     char *endptr1 = NULL;
     char *endptr2 = NULL;
     unsigned long long wall_val = strtoull(str, &endptr1, 10);
-    unsigned long long lamport_val = strtoull(hyphen + 1, &endptr2, 10);
+    unsigned long long logical_val = strtoull(hyphen + 1, &endptr2, 10);
     if (endptr1 != hyphen || endptr1 == str || endptr2 == (hyphen + 1) || *endptr2 != '\0' || wall_val == 0) {
         decrRefCount(decoded);
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: bad HLC timestamp format");
@@ -3611,12 +3603,12 @@ void rreplayCommand(client *c) {
 
     hlc hlc_ts;
     hlc_ts.wall_time = wall_val;
-    hlc_ts.logical = lamport_val;
+    hlc_ts.logical = logical_val;
     decrRefCount(decoded);
 
     /* HLC receive/merge algorithm:
      * 1. Find max wall clock time among physical time, local wall clock, and remote wall clock.
-     * 2. Adjust Lamport logical counter based on which clocks match the maximum wall clock.
+     * 2. Adjust logical counter based on which clocks match the maximum wall clock.
      * 3. Update the global clock. */
 
     uint64_t physical_time = ustime();
@@ -3629,7 +3621,7 @@ void rreplayCommand(client *c) {
     int hlc_ts_ignored = 0;
     if (server.hlc_max_clock_drift > 0 &&
         hlc_ts.wall_time > physical_time + (uint64_t)server.hlc_max_clock_drift) {
-        serverLog(LL_WARNING,"Ignoring RREPLAY HLC timestamp (wall=%llu logical=%llu): %.3f ms ahead of local physical clock (drift tolerance %.3f ms).",
+        serverLog(LL_WARNING, "Ignoring RREPLAY HLC timestamp (wall=%llu logical=%llu): %.3f ms ahead of local physical clock (drift tolerance %.3f ms).",
                   (unsigned long long)hlc_ts.wall_time,
                   (unsigned long long)hlc_ts.logical,
                   (double)(hlc_ts.wall_time - physical_time) / 1000.0,
@@ -3641,7 +3633,7 @@ void rreplayCommand(client *c) {
     if (physical_time > max_wall) max_wall = physical_time;
     if (!hlc_ts_ignored && hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
 
-    if (!hlc_ts_ignored && max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare Lamport ts */
+    if (!hlc_ts_ignored && max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare logical ts */
         server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
     } else if (max_wall == server.hlc_clock.wall_time) {
         server.hlc_clock.logical++;
@@ -3694,7 +3686,7 @@ void rreplayCommand(client *c) {
     int exec_payload_argc = 0;
     if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
         exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
-                                                      &exec_payload_argc);
+                                                     &exec_payload_argc);
         if (exec_payload_argv == NULL || exec_payload_argc <= 1) {
             if (from_primary_link) {
                 c->flag.skip_repl_stream_propagation = 1;

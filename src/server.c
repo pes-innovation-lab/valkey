@@ -6741,7 +6741,7 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
                 "upstream_runtime_replay_pending_dropped:%llu\r\n", upstream_runtime_replay_pending_dropped,
                 "upstream_runtime_replay_fullsync_requests:%llu\r\n", upstream_runtime_replay_fullsync_requests,
                 "hlc_clock_wall:%llu\r\n", (unsigned long long)server.hlc_clock.wall_time,
-                "hlc_clock_lamport:%llu\r\n", (unsigned long long)server.hlc_clock.logical,
+                "hlc_clock_logical:%llu\r\n", (unsigned long long)server.hlc_clock.logical,
                 "hlc_key_clock_entries:%lu\r\n", server.hlc_key_clock ? dictSize(server.hlc_key_clock) : 0,
                 "hlc_key_tie_break_entries:%lu\r\n", server.hlc_key_tie_break ? dictSize(server.hlc_key_tie_break) : 0,
                 "hlc_rdb_clock_max_entries:%lld\r\n", server.hlc_rdb_clock_max_entries,
@@ -6779,8 +6779,10 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
                         host = runtime->host;
                         port = runtime->port;
                         is_current = runtime->active_link;
-                        if (runtime->repl_state == REPL_STATE_CONNECTED) upstream_state = "up";
-                        else if (runtime->repl_state != REPL_STATE_NONE) upstream_state = "down";
+                        if (runtime->repl_state == REPL_STATE_CONNECTED)
+                            upstream_state = "up";
+                        else if (runtime->repl_state != REPL_STATE_NONE)
+                            upstream_state = "down";
                         if (runtime->reploff >= 0) upstream_offset = runtime->reploff;
                         if (runtime->last_io_sec >= 0) upstream_last_io = (int)runtime->last_io_sec;
                         replay_last_sent_id = runtime->replay_last_sent_id;
@@ -7452,8 +7454,8 @@ void dismissMemoryInChild(void) {
     /* madvise(MADV_DONTNEED) may not work if Transparent Huge Pages is enabled. */
     if (server.thp_enabled) return;
 
-        /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
-         * so we avoid these pointless loops when they're not going to do anything. */
+    /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
+     * so we avoid these pointless loops when they're not going to do anything. */
 #if defined(USE_JEMALLOC) && defined(__linux__)
     listIter li;
     listNode *ln;

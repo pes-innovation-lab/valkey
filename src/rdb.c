@@ -1323,8 +1323,7 @@ static void hlcPersistHeapSiftDown(hlcPersistEntry *heap, unsigned long size, un
     }
 }
 
-static void hlcPersistHeapPushOrReplace(hlcPersistEntry *heap, unsigned long *size, unsigned long cap,
-                                         hlcPersistEntry candidate) {
+static void hlcPersistHeapPushOrReplace(hlcPersistEntry *heap, unsigned long *size, unsigned long cap, hlcPersistEntry candidate) {
     if (heap == NULL || size == NULL || cap == 0) return;
     if (*size < cap) {
         heap[*size] = candidate;
@@ -1469,7 +1468,7 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
         if (rdbSaveAuxFieldStrStr(rdb, "repl-id", server.replid) == -1) return -1;
         if (rdbSaveAuxFieldStrInt(rdb, "repl-offset", server.primary_repl_offset) == -1) return -1;
         if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-wall", server.hlc_clock.wall_time) == -1) return -1;
-        if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-lamport", server.hlc_clock.logical) == -1) return -1;
+        if (rdbSaveAuxFieldStrInt(rdb, "hlc-clock-logical", server.hlc_clock.logical) == -1) return -1;
         unsigned long upstream_count = server.upstreams ? listLength(server.upstreams) : 0;
         if (rdbSaveAuxFieldStrInt(rdb, "repl-masters-count", upstream_count) == -1) return -1;
         if (upstream_count) {
@@ -1596,10 +1595,10 @@ int rdbSaveInfoAuxFields(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
 
             for (unsigned long mvcc_id = 0; mvcc_id < heap_size; mvcc_id++) {
                 uint64_t wall_be = htonu64(heap[mvcc_id].ts.wall_time);
-                uint64_t lamport_be = htonu64(heap[mvcc_id].ts.logical);
+                uint64_t logical_be = htonu64(heap[mvcc_id].ts.logical);
                 sds auxkey = sdscatprintf(sdsempty(), "hlc-key-%lu", mvcc_id);
                 sds auxval = sdsnewlen(&wall_be, sizeof(wall_be));
-                auxval = sdscatlen(auxval, &lamport_be, sizeof(lamport_be));
+                auxval = sdscatlen(auxval, &logical_be, sizeof(logical_be));
                 auxval = sdscatlen(auxval, heap[mvcc_id].key, sdslen(heap[mvcc_id].key));
                 int rc = rdbSaveAuxField(rdb, auxkey, sdslen(auxkey), auxval, sdslen(auxval));
                 sdsfree(auxkey);
@@ -3657,7 +3656,7 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                     long long val = strtoll(objectGetVal(auxval), NULL, 10);
                     if (val > 0) rsi->hlc_clock.wall_time = (uint64_t)val;
                 }
-            } else if (!strcasecmp(objectGetVal(auxkey), "hlc-clock-lamport")) {
+            } else if (!strcasecmp(objectGetVal(auxkey), "hlc-clock-logical")) {
                 if (rsi) {
                     long long val = strtoll(objectGetVal(auxval), NULL, 10);
                     if (val >= 0) rsi->hlc_clock.logical = (uint64_t)val;
@@ -3763,10 +3762,10 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
                         goto eoferr;
                     }
 
-                    uint64_t wall_be = 0, lamport_be = 0;
+                    uint64_t wall_be = 0, logical_be = 0;
                     memcpy(&wall_be, raw, sizeof(uint64_t));
-                    memcpy(&lamport_be, raw + sizeof(uint64_t), sizeof(uint64_t));
-                    hlc ts = { ntohu64(wall_be), ntohu64(lamport_be) };
+                    memcpy(&logical_be, raw + sizeof(uint64_t), sizeof(uint64_t));
+                    hlc ts = {ntohu64(wall_be), ntohu64(logical_be)};
                     if (hlcCompare(&ts, &rsi->hlc_clock) > 0) rsi->hlc_clock = ts;
 
                     sds hlc_key = sdsnewlen(raw + sizeof(uint64_t) * 2, sdslen(raw) - sizeof(uint64_t) * 2);

@@ -332,7 +332,7 @@ start_server {tags {"repl external:skip"}} {
             $node0 rreplay 8888888888888888888888888888888888888888 $dbid 10000 $current_wall-5 set mm:drift:k1 val2
             
             # Since incoming logical was 5, server logical should become at least 6
-            assert {[s -1 hlc_clock_lamport] >= 6}
+            assert {[s -1 hlc_clock_logical] >= 6}
         }
 
         test {HLC deterministic tie-breaking on identical HLC timestamps} {
