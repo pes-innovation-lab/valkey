@@ -311,7 +311,7 @@ start_server {tags {"repl external:skip"}} {
             }
         }
 
-        test {HLC clock drift updates global HLC clock on replica} {
+        test {HLC clock drift does not update global HLC clock on replica and drops op} {
             # Check current clock
             set initial_wall [s -1 hlc_clock_wall]
             set future_wall [expr {$initial_wall + 10000000}]
@@ -321,15 +321,21 @@ start_server {tags {"repl external:skip"}} {
             assert_equal OK [$node0 replconf uuid 9999999999999999999999999999999999999999]
             $node0 rreplay 8888888888888888888888888888888888888888 $dbid 9999 $future_wall-0 set mm:drift:k1 val1
             
-            # Verify node0 clock wall time updated
-            assert {[s -1 hlc_clock_wall] >= $future_wall}
+            # Verify node0 clock wall time did NOT update to future_wall
+            assert {[s -1 hlc_clock_wall] < $future_wall}
+            
+            # Verify the operation was dropped
+            assert_equal "" [$node0 get mm:drift:k1]
         }
 
         test {HLC logical clock increments when wall clocks are same} {
-            set current_wall [s -1 hlc_clock_wall]
+            set current_wall [expr {[s -1 hlc_clock_wall] + 100000}]
+            
+            # Send a frame to update the clock to current_wall
+            $node0 rreplay 8888888888888888888888888888888888888888 $dbid 10001 $current_wall-0 set mm:drift:k1 val2
             
             # Send a frame with same wall time but higher logical clock (e.g., 5)
-            $node0 rreplay 8888888888888888888888888888888888888888 $dbid 10000 $current_wall-5 set mm:drift:k1 val2
+            $node0 rreplay 8888888888888888888888888888888888888888 $dbid 10002 $current_wall-5 set mm:drift:k1 val3
             
             # Since incoming logical was 5, server logical should become at least 6
             assert {[s -1 hlc_clock_logical] >= 6}

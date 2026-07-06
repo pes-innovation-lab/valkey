@@ -3615,31 +3615,34 @@ void rreplayCommand(client *c) {
      * ignore the remote wall time entirely. This prevents a node with a runaway
      * or corrupted clock from polluting the cluster's HLC.
      * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
-    int hlc_ts_ignored = 0;
     if (server.hlc_max_clock_drift > 0 &&
         hlc_ts.wall_time > physical_time + (uint64_t)server.hlc_max_clock_drift) {
-        serverLog(LL_WARNING, "Ignoring RREPLAY HLC timestamp (wall=%llu logical=%llu): %.3f ms ahead of local physical clock (drift tolerance %.3f ms).",
+        serverLog(LL_WARNING, "Ignoring RREPLAY operation due to corrupted HLC timestamp (wall=%llu logical=%llu): %.3f ms ahead of local physical clock (drift tolerance %.3f ms).",
                   (unsigned long long)hlc_ts.wall_time,
                   (unsigned long long)hlc_ts.logical,
                   (double)(hlc_ts.wall_time - physical_time) / 1000.0,
                   (double)server.hlc_max_clock_drift / 1000.0);
-        hlc_ts_ignored = 1;
-    }
-
-    uint64_t max_wall = server.hlc_clock.wall_time;
-    if (physical_time > max_wall) max_wall = physical_time;
-    if (!hlc_ts_ignored && hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
-
-    if (!hlc_ts_ignored && max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare logical ts */
-        server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
-    } else if (max_wall == server.hlc_clock.wall_time) {
-        server.hlc_clock.logical++;
-    } else if (!hlc_ts_ignored && max_wall == hlc_ts.wall_time) {
-        server.hlc_clock.logical = hlc_ts.logical + 1;
+        if (from_primary_link) {
+            c->flag.skip_repl_stream_propagation = 1;
+        }
+        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
+        return;
     } else {
-        server.hlc_clock.logical = 0;
+        uint64_t max_wall = server.hlc_clock.wall_time;
+        if (physical_time > max_wall) max_wall = physical_time;
+        if (hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
+
+        if (max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare logical ts */
+            server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
+        } else if (max_wall == server.hlc_clock.wall_time) {
+            server.hlc_clock.logical++;
+        } else if (max_wall == hlc_ts.wall_time) {
+            server.hlc_clock.logical = hlc_ts.logical + 1;
+        } else {
+            server.hlc_clock.logical = 0;
+        }
+        server.hlc_clock.wall_time = max_wall;
     }
-    server.hlc_clock.wall_time = max_wall;
 
     int payload_argc = c->argc - 5;
     robj **payload_argv = c->argv + 5;
