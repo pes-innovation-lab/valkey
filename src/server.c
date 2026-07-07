@@ -2391,12 +2391,10 @@ void initServerConfig(void) {
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
-    server.rreplay_pending_max_entries = CONFIG_DEFAULT_RREPLAY_PENDING_MAX_ENTRIES;
     server.hlc_key_clock = NULL;
     server.hlc_key_tie_break = NULL;
     server.hlc_clock.wall_time = 0;
     server.hlc_clock.logical = 0;
-    server.hlc_rdb_clock_max_entries = CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES;
     server.hlc_rdb_clock_entries_dropped_last_save = 0;
     server.primary_host = NULL;
     server.primary_port = 6379;
