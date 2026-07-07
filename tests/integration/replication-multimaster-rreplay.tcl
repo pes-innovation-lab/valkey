@@ -329,7 +329,9 @@ start_server {tags {"repl external:skip"}} {
         }
 
         test {HLC logical clock increments when wall clocks are same} {
-            set current_wall [expr {[s -1 hlc_clock_wall] + 100000}]
+            set now [$node0 time]
+            set now_us [expr {[lindex $now 0] * 1000000 + [lindex $now 1]}]
+            set current_wall [expr {$now_us + 100000}]
             
             # Send a frame to update the clock to current_wall
             $node0 rreplay 8888888888888888888888888888888888888888 $dbid 10001 $current_wall-0 set mm:drift:k1 val2
