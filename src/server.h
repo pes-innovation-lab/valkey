@@ -1689,7 +1689,7 @@ typedef struct rdbSaveInfo {
     sds *repl_runtime_pending_entries;    /* Pending entries encoded as "<runtime-idx:u64><replay-id:u64><resp-frame-bytes...>". */
     int rreplay_seen_count;               /* Number of persisted dedupe keys from RREPLAY. */
     sds *rreplay_seen_entries;            /* Dedupe keys encoded as "<origin-uuid>:<replay-id>". */
-    hlc hlc_clock;                      /* Global HLC logical clock persisted in RDB AUX. */
+    hlc hlc_clock;                        /* Global HLC logical clock persisted in RDB AUX. */
     dict *hlc_key_clock;                  /* Encoded key clock map loaded from RDB AUX. */
 } rdbSaveInfo;
 
