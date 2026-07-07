@@ -1,11 +1,11 @@
 {
-    "MVCCRESTORE": {
-        "summary": "Restores a key from serialized payload with an explicit MVCC logical timestamp.",
+    "HLCRESTORE": {
+        "summary": "Restores a key from serialized payload with an explicit HLC timestamp.",
         "complexity": "O(1) to create the new key and additional O(N*M) to reconstruct the serialized value, where N is the number of objects composing the value and M their average size.",
         "group": "server",
         "since": "255.255.255",
         "arity": -5,
-        "function": "mvccrestoreCommand",
+        "function": "hlcrestoreCommand",
         "doc_flags": [
             "SYSCMD"
         ],
@@ -54,7 +54,7 @@
                 "type": "string"
             },
             {
-                "name": "mvcc-ts",
+                "name": "hlc-ts",
                 "type": "integer"
             },
             {

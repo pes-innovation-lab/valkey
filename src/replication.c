@@ -987,10 +987,7 @@ static int parseUnsignedLongLongField(const char *field, unsigned long long *out
     return C_OK;
 }
 
-static int decodeRdbRuntimePendingEntry(sds encoded, unsigned long long *runtime_index,
-                                        unsigned long long *replay_id,
-                                        const unsigned char **frame_ptr,
-                                        size_t *frame_len) {
+static int decodeRdbRuntimePendingEntry(sds encoded, unsigned long long *runtime_index, unsigned long long *replay_id, const unsigned char **frame_ptr, size_t *frame_len) {
     if (encoded == NULL || runtime_index == NULL || replay_id == NULL || frame_ptr == NULL || frame_len == NULL) {
         return C_ERR;
     }
@@ -1007,12 +1004,7 @@ static int decodeRdbRuntimePendingEntry(sds encoded, unsigned long long *runtime
     return C_OK;
 }
 
-static int decodeRdbUpstreamRuntime(sds encoded, sds *host, int *port,
-                                    unsigned long long *last_sent,
-                                    unsigned long long *last_acked,
-                                    unsigned long long *tx_frames,
-                                    unsigned long long *rx_frames,
-                                    unsigned long long *ack_frames) {
+static int decodeRdbUpstreamRuntime(sds encoded, sds *host, int *port, unsigned long long *last_sent, unsigned long long *last_acked, unsigned long long *tx_frames, unsigned long long *rx_frames, unsigned long long *ack_frames) {
     if (encoded == NULL || host == NULL || port == NULL || last_sent == NULL ||
         last_acked == NULL || tx_frames == NULL || rx_frames == NULL || ack_frames == NULL) {
         return C_ERR;
@@ -1209,37 +1201,49 @@ void replicationApplyRdbUpstreamRuntimeState(const rdbSaveInfo *rsi) {
     syncUpstreamRuntimeWithConfigured();
 }
 
-void replicationApplyRdbMVCCState(const rdbSaveInfo *rsi) {
-    if (server.mvcc_key_clock == NULL) return;
+void replicationApplyRdbHLCState(const rdbSaveInfo *rsi) {
+    if (server.hlc_key_clock == NULL) return;
 
-    dictEmpty(server.mvcc_key_clock, NULL);
-    if (server.mvcc_key_tie_break) dictEmpty(server.mvcc_key_tie_break, NULL);
-    server.mvcc_clock = 0;
+    dictEmpty(server.hlc_key_clock, NULL);
+    if (server.hlc_key_tie_break) dictEmpty(server.hlc_key_tie_break, NULL);
+    server.hlc_clock.wall_time = 0;
+    server.hlc_clock.logical = 0;
 
     if (rsi == NULL) return;
-    if (rsi->mvcc_clock > server.mvcc_clock) {
-        server.mvcc_clock = rsi->mvcc_clock;
+    /* self-stabilization: guard against restoring a persisted HLC
+     * that is wildly ahead of the current physical clock (e.g., saved while a
+     * node had a bad clock). Resetting here prevents one stale RDB from
+     * inflating the cluster HLC on restart.
+     * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    server.hlc_clock = rsi->hlc_clock;
+    if (server.hlc_max_clock_drift > 0 && rsi->hlc_clock.wall_time != 0) {
+        uint64_t pt = ustime();
+        if (rsi->hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
+            serverLog(LL_WARNING, "RDB HLC wall time (%.3f ms ahead of physical clock) exceeds hlc-max-clock-drift; resetting to physical time.", (double)(rsi->hlc_clock.wall_time - pt) / 1000.0);
+            server.hlc_clock.wall_time = pt;
+            server.hlc_clock.logical = 0;
+        }
     }
-    if (rsi->mvcc_key_clock == NULL) return;
+    if (rsi->hlc_key_clock == NULL) return;
 
     dictIterator di;
-    dictInitIterator(&di, rsi->mvcc_key_clock);
+    dictInitIterator(&di, rsi->hlc_key_clock);
     dictEntry *de = NULL;
     while ((de = dictNext(&di)) != NULL) {
         sds key = sdsdup(dictGetKey(de));
-        uint64_t *src_clock = dictGetVal(de);
-        if (src_clock == NULL || *src_clock == 0) {
+        hlc *src_clock = dictGetVal(de);
+        if (src_clock == NULL || (src_clock->wall_time == 0 && src_clock->logical == 0)) {
             sdsfree(key);
             continue;
         }
-        uint64_t *dst_clock = zmalloc(sizeof(*dst_clock));
+        hlc *dst_clock = zmalloc(sizeof(*dst_clock));
         *dst_clock = *src_clock;
 
-        if (dictAdd(server.mvcc_key_clock, key, dst_clock) != DICT_OK) {
-            dictEntry *existing = dictFind(server.mvcc_key_clock, key);
+        if (dictAdd(server.hlc_key_clock, key, dst_clock) != DICT_OK) {
+            dictEntry *existing = dictFind(server.hlc_key_clock, key);
             if (existing) {
-                uint64_t *existing_clock = dictGetVal(existing);
-                if (existing_clock && *dst_clock > *existing_clock) {
+                hlc *existing_clock = dictGetVal(existing);
+                if (existing_clock && hlcCompare(dst_clock, existing_clock) > 0) {
                     *existing_clock = *dst_clock;
                 }
             }
@@ -1247,7 +1251,9 @@ void replicationApplyRdbMVCCState(const rdbSaveInfo *rsi) {
             zfree(dst_clock);
             continue;
         }
-        if (*dst_clock > server.mvcc_clock) server.mvcc_clock = *dst_clock;
+        if (hlcCompare(dst_clock, &server.hlc_clock) > 0) {
+            server.hlc_clock = *dst_clock;
+        }
     }
 }
 
@@ -1330,16 +1336,29 @@ void replicationApplyRdbRReplaySeen(const rdbSaveInfo *rsi) {
     }
 }
 
-static uint64_t mvccNextLocalClock(void) {
-    uint64_t now = ustime();
-    if (now <= server.mvcc_clock) {
-        now = server.mvcc_clock + 1;
+static hlc hlcNextLocalClock(void) {
+    uint64_t pt = ustime();
+    /* self-stabilization: if the HLC wall time has drifted too far
+     * ahead of physical time, reset it back to pt and zero the logical counter
+     * rather than letting the divergence compound across the cluster.
+     * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    if (server.hlc_max_clock_drift > 0 &&
+        server.hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
+        serverLog(LL_WARNING, "HLC wall time drifted %.3f ms ahead of physical clock; resetting to physical time (hlc self-stabilization).", (double)(server.hlc_clock.wall_time - pt) / 1000.0);
+        server.hlc_clock.wall_time = pt;
+        server.hlc_clock.logical = 0;
+    } else {
+        if (pt > server.hlc_clock.wall_time) {
+            server.hlc_clock.wall_time = pt;
+            server.hlc_clock.logical = 0;
+        } else { /* Clock delta is negative or equal, increment logical counter */
+            server.hlc_clock.logical++;
+        }
     }
-    server.mvcc_clock = now;
-    return now;
+    return server.hlc_clock;
 }
 
-static sds mvccComposeKey(int dbid, robj *keyobj) {
+static sds hlcComposeKey(int dbid, robj *keyobj) {
     uint64_t dbid_be = htonu64((uint64_t)(uint32_t)dbid);
     sds key = sdsnewlen(&dbid_be, sizeof(dbid_be));
     if (keyobj->encoding == OBJ_ENCODING_INT) {
@@ -1353,36 +1372,34 @@ static sds mvccComposeKey(int dbid, robj *keyobj) {
     return key;
 }
 
-static uint64_t mvccGetKeyClock(int dbid, robj *keyobj) {
-    if (server.mvcc_key_clock == NULL || keyobj == NULL || dbid < 0) return 0;
-    sds key = mvccComposeKey(dbid, keyobj);
-    dictEntry *de = dictFind(server.mvcc_key_clock, key);
-    sdsfree(key);
-    if (de == NULL) return 0;
-    uint64_t *clockp = dictGetVal(de);
-    return clockp ? *clockp : 0;
-}
 
-static char *mvccGetKeyTieBreak(int dbid, robj *keyobj) {
-    if (server.mvcc_key_tie_break == NULL || keyobj == NULL || dbid < 0) return NULL;
-    sds key = mvccComposeKey(dbid, keyobj);
-    dictEntry *de = dictFind(server.mvcc_key_tie_break, key);
+static char *hlcGetKeyTieBreak(int dbid, robj *keyobj) {
+    if (server.hlc_key_tie_break == NULL || keyobj == NULL || dbid < 0) return NULL;
+    sds key = hlcComposeKey(dbid, keyobj);
+    dictEntry *de = dictFind(server.hlc_key_tie_break, key);
     sdsfree(key);
     if (de == NULL) return NULL;
     return dictGetVal(de);
 }
 
-uint64_t replicationMVCCGetKeyClock(int dbid, robj *key) {
-    return mvccGetKeyClock(dbid, key);
+hlc replicationHLCGetKeyClock(int dbid, robj *keyobj) {
+    hlc zero = {0, 0};
+    if (server.hlc_key_clock == NULL || keyobj == NULL || dbid < 0) return zero;
+    sds key = hlcComposeKey(dbid, keyobj);
+    dictEntry *de = dictFind(server.hlc_key_clock, key);
+    sdsfree(key);
+    if (de == NULL) return zero;
+    hlc *clockp = dictGetVal(de);
+    return clockp ? *clockp : zero;
 }
 
-static void mvccSetKeyTieBreak(int dbid, robj *keyobj, const char *tie_break) {
-    if (server.mvcc_key_tie_break == NULL || keyobj == NULL || dbid < 0) return;
+static void hlcSetKeyTieBreak(int dbid, robj *keyobj, const char *tie_break) {
+    if (server.hlc_key_tie_break == NULL || keyobj == NULL || dbid < 0) return;
 
-    sds key = mvccComposeKey(dbid, keyobj);
-    dictEntry *de = dictFind(server.mvcc_key_tie_break, key);
+    sds key = hlcComposeKey(dbid, keyobj);
+    dictEntry *de = dictFind(server.hlc_key_tie_break, key);
     if (tie_break == NULL) {
-        if (de != NULL) dictDelete(server.mvcc_key_tie_break, key);
+        if (de != NULL) dictDelete(server.hlc_key_tie_break, key);
         sdsfree(key);
         return;
     }
@@ -1390,49 +1407,49 @@ static void mvccSetKeyTieBreak(int dbid, robj *keyobj, const char *tie_break) {
     if (de != NULL) {
         char *existing = dictGetVal(de);
         if (existing) zfree(existing);
-        dictSetVal(server.mvcc_key_tie_break, de, zstrdup(tie_break));
+        dictSetVal(server.hlc_key_tie_break, de, zstrdup(tie_break));
         sdsfree(key);
         return;
     }
 
     char *payload = zstrdup(tie_break);
-    if (dictAdd(server.mvcc_key_tie_break, key, payload) != DICT_OK) {
+    if (dictAdd(server.hlc_key_tie_break, key, payload) != DICT_OK) {
         sdsfree(key);
         zfree(payload);
     }
 }
 
-static void mvccSetKeyClock(int dbid, robj *keyobj, uint64_t ts) {
-    if (server.mvcc_key_clock == NULL || keyobj == NULL || dbid < 0 || ts == 0) return;
+static void hlcSetKeyClock(int dbid, robj *keyobj, hlc ts) {
+    if (server.hlc_key_clock == NULL || keyobj == NULL || dbid < 0 || (ts.wall_time == 0 && ts.logical == 0)) return;
 
-    sds key = mvccComposeKey(dbid, keyobj);
-    dictEntry *de = dictFind(server.mvcc_key_clock, key);
+    sds key = hlcComposeKey(dbid, keyobj);
+    dictEntry *de = dictFind(server.hlc_key_clock, key);
     if (de != NULL) {
-        uint64_t *clockp = dictGetVal(de);
+        hlc *clockp = dictGetVal(de);
         if (clockp) *clockp = ts;
         sdsfree(key);
         return;
     }
 
-    uint64_t *clockp = zmalloc(sizeof(*clockp));
+    hlc *clockp = zmalloc(sizeof(*clockp));
     *clockp = ts;
-    if (dictAdd(server.mvcc_key_clock, key, clockp) != DICT_OK) {
+    if (dictAdd(server.hlc_key_clock, key, clockp) != DICT_OK) {
         sdsfree(key);
         zfree(clockp);
     }
 }
 
-void replicationMVCCSetKeyClock(int dbid, robj *key, uint64_t ts) {
-    if (ts == 0) return;
-    uint64_t current = mvccGetKeyClock(dbid, key);
-    if (ts < current) ts = current;
-    if (ts > server.mvcc_clock) server.mvcc_clock = ts;
-    mvccSetKeyClock(dbid, key, ts);
-    mvccSetKeyTieBreak(dbid, key, NULL);
+void replicationHLCSetKeyClock(int dbid, robj *key, hlc ts) {
+    if (ts.wall_time == 0 && ts.logical == 0) return;
+    hlc current = replicationHLCGetKeyClock(dbid, key);
+    if (hlcCompare(&ts, &current) < 0) ts = current;
+    if (hlcCompare(&ts, &server.hlc_clock) > 0) server.hlc_clock = ts;
+    hlcSetKeyClock(dbid, key, ts);
+    hlcSetKeyTieBreak(dbid, key, NULL);
 }
 
-static int mvccCommandIsFresh(struct serverCommand *cmd, robj **argv, int argc, int dbid, uint64_t ts, const char *tie_break) {
-    if (ts == 0 || dbid < 0 || cmd == NULL) return 1;
+static int hlcCommandIsFresh(struct serverCommand *cmd, robj **argv, int argc, int dbid, hlc ts, const char *tie_break) {
+    if ((ts.wall_time == 0 && ts.logical == 0) || dbid < 0 || cmd == NULL) return 1;
 
     getKeysResult result;
     initGetKeysResult(&result);
@@ -1447,13 +1464,14 @@ static int mvccCommandIsFresh(struct serverCommand *cmd, robj **argv, int argc, 
         int pos = result.keys[i].pos;
         if (pos < 0 || pos >= argc) continue;
 
-        uint64_t current = mvccGetKeyClock(dbid, argv[pos]);
-        if (ts < current) {
+        hlc current = replicationHLCGetKeyClock(dbid, argv[pos]);
+        int cmp = hlcCompare(&ts, &current);
+        if (cmp < 0) {
             fresh = 0;
             break;
         }
-        if (tie_break != NULL && ts == current) {
-            char *current_tie_break = mvccGetKeyTieBreak(dbid, argv[pos]);
+        if (tie_break != NULL && cmp == 0) {
+            char *current_tie_break = hlcGetKeyTieBreak(dbid, argv[pos]);
             if (current_tie_break != NULL && strcmp(tie_break, current_tie_break) <= 0) {
                 fresh = 0;
                 break;
@@ -1465,13 +1483,14 @@ static int mvccCommandIsFresh(struct serverCommand *cmd, robj **argv, int argc, 
     return fresh;
 }
 
-static int mvccKeyIsFresh(int dbid, robj *keyobj, uint64_t ts, const char *tie_break) {
-    if (ts == 0 || dbid < 0 || keyobj == NULL) return 1;
+static int hlcKeyIsFresh(int dbid, robj *keyobj, hlc ts, const char *tie_break) {
+    if ((ts.wall_time == 0 && ts.logical == 0) || dbid < 0 || keyobj == NULL) return 1;
 
-    uint64_t current = mvccGetKeyClock(dbid, keyobj);
-    if (ts < current) return 0;
-    if (tie_break != NULL && ts == current) {
-        char *current_tie_break = mvccGetKeyTieBreak(dbid, keyobj);
+    hlc current = replicationHLCGetKeyClock(dbid, keyobj);
+    int cmp = hlcCompare(&ts, &current);
+    if (cmp < 0) return 0;
+    if (tie_break != NULL && cmp == 0) {
+        char *current_tie_break = hlcGetKeyTieBreak(dbid, keyobj);
         if (current_tie_break != NULL && strcmp(tie_break, current_tie_break) <= 0) {
             return 0;
         }
@@ -1502,7 +1521,7 @@ static void freeOwnedArgvVector(robj **argv, int argc) {
 
 /* Build an MSET payload containing only fresh key/value pairs.
  * Returns a newly allocated argv array with owned references. */
-static robj **mvccBuildFreshMsetPayload(robj **argv, int argc, int dbid, uint64_t ts, const char *tie_break, int *out_argc) {
+static robj **hlcBuildFreshMsetPayload(robj **argv, int argc, int dbid, hlc ts, const char *tie_break, int *out_argc) {
     if (out_argc) *out_argc = 0;
     if (argv == NULL || argc < 3 || (argc % 2) == 0) return NULL;
 
@@ -1513,7 +1532,7 @@ static robj **mvccBuildFreshMsetPayload(robj **argv, int argc, int dbid, uint64_
 
     for (int i = 1; i < argc; i += 2) {
         if (i + 1 >= argc) break;
-        if (!mvccKeyIsFresh(dbid, argv[i], ts, tie_break)) continue;
+        if (!hlcKeyIsFresh(dbid, argv[i], ts, tie_break)) continue;
         subset[next++] = argv[i];
         incrRefCount(subset[next - 1]);
         subset[next++] = argv[i + 1];
@@ -1529,8 +1548,8 @@ static robj **mvccBuildFreshMsetPayload(robj **argv, int argc, int dbid, uint64_
     return subset;
 }
 
-static void mvccStampCommandKeys(struct serverCommand *cmd, robj **argv, int argc, int dbid, uint64_t ts, const char *tie_break) {
-    if (ts == 0 || dbid < 0 || cmd == NULL) return;
+static void hlcStampCommandKeys(struct serverCommand *cmd, robj **argv, int argc, int dbid, hlc ts, const char *tie_break) {
+    if ((ts.wall_time == 0 && ts.logical == 0) || dbid < 0 || cmd == NULL) return;
 
     getKeysResult result;
     initGetKeysResult(&result);
@@ -1543,8 +1562,8 @@ static void mvccStampCommandKeys(struct serverCommand *cmd, robj **argv, int arg
     for (int i = 0; i < numkeys; i++) {
         int pos = result.keys[i].pos;
         if (pos < 0 || pos >= argc) continue;
-        mvccSetKeyClock(dbid, argv[pos], ts);
-        mvccSetKeyTieBreak(dbid, argv[pos], tie_break);
+        hlcSetKeyClock(dbid, argv[pos], ts);
+        hlcSetKeyTieBreak(dbid, argv[pos], tie_break);
     }
 
     getKeysFreeResult(&result);
@@ -1565,7 +1584,7 @@ static int rreplaySetUsesUnsupportedTtlOptions(robj **argv, int argc) {
     return 0;
 }
 
-/* Raw read-modify-write commands are not replay-safe with command-level MVCC.
+/* Raw read-modify-write commands are not replay-safe with command-level HLC/LWW.
  * Incoming replay frames with these commands are rejected. Local writes are
  * canonicalized to deterministic absolute writes before wrapping in RREPLAY. */
 static int rreplayCommandIsRiskyRmw(struct serverCommand *cmd) {
@@ -2408,7 +2427,7 @@ static void forwardRawRReplayFrameToUpstreams(robj **argv, int argc, client *exc
 /* Encapsulate a locally generated command and send it upstream to the
  * connected primary as an active-active replay frame.
  *
- * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <mvcc-ts> <command> [arg ...] */
+ * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <command> [arg ...] */
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     if (dictid < 0 || argv == NULL || argc <= 0) return;
 
@@ -2440,10 +2459,10 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     }
 
     unsigned long long replay_id = ++server.rreplay_seq;
-    uint64_t mvcc_ts = mvccNextLocalClock();
+    hlc hlc_ts = hlcNextLocalClock();
     char replay_tie_break[CONFIG_RUN_ID_SIZE + 32];
     snprintf(replay_tie_break, sizeof(replay_tie_break), "%s:%llu", server.runid, replay_id);
-    mvccStampCommandKeys(payload_cmd, payload_argv, payload_argc, dictid, mvcc_ts, replay_tie_break);
+    hlcStampCommandKeys(payload_cmd, payload_argv, payload_argc, dictid, hlc_ts, replay_tie_break);
 
     int frame_argc = payload_argc + 5;
     robj **frame_argv = zmalloc(sizeof(robj *) * frame_argc);
@@ -2451,7 +2470,13 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     frame_argv[1] = createStringObject(server.runid, CONFIG_RUN_ID_SIZE);
     frame_argv[2] = createStringObjectFromLongLong(dictid);
     frame_argv[3] = createStringObjectFromLongLong((long long)replay_id);
-    frame_argv[4] = createStringObjectFromLongLong((long long)mvcc_ts);
+    /* Serialize HLC timestamp as <wall_time>-<logical> string representation */
+    char hlc_buf[64];
+    int hlc_len = snprintf(hlc_buf, sizeof(hlc_buf),
+                           "%llu-%llu",
+                           (unsigned long long)hlc_ts.wall_time,
+                           (unsigned long long)hlc_ts.logical);
+    frame_argv[4] = createStringObject(hlc_buf, hlc_len);
     for (int j = 0; j < payload_argc; j++) {
         frame_argv[j + 5] = payload_argv[j];
         incrRefCount(frame_argv[j + 5]);
@@ -3471,7 +3496,7 @@ void replconfCommand(client *c) {
     addReply(c, shared.ok);
 }
 
-/* RREPLAY <origin-uuid> <dbid> <replay-id> [<mvcc-ts>] <command> [arg ...]
+/* RREPLAY <origin-uuid> <dbid> <replay-id> [<hlc-ts>] <command> [arg ...]
  * Internal active-active replay wrapper.
  *
  * Accepted from replication links and from internal multi-master peer links.
@@ -3544,28 +3569,82 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    int payload_start = 4;
-    uint64_t mvcc_ts = 0;
-    if (c->argc >= 6) {
-        long long parsed_ts = 0;
-        if (getLongLongFromObject(c->argv[4], &parsed_ts) == C_OK && parsed_ts > 0) {
-            mvcc_ts = (uint64_t)parsed_ts;
-            payload_start = 5;
-            if (mvcc_ts > server.mvcc_clock) server.mvcc_clock = mvcc_ts;
-        }
+    if (c->argc < 6) {
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp or payload command");
+        freeClientAsync(c);
+        return;
     }
 
-    int payload_argc = c->argc - payload_start;
-    robj **payload_argv = c->argv + payload_start;
-    struct serverCommand *payload_cmd = lookupCommand(payload_argv, payload_argc);
-    if (!payload_cmd && payload_start == 5) {
-        /* Backward compatibility: accept older frame format without mvcc-ts. */
-        mvcc_ts = 0;
-        payload_start = 4;
-        payload_argc = c->argc - payload_start;
-        payload_argv = c->argv + payload_start;
-        payload_cmd = lookupCommand(payload_argv, payload_argc);
+    robj *decoded = getDecodedObject(c->argv[4]); /* Convert to str to perform hyphen check*/
+    char *str = objectGetVal(decoded);
+    char *hyphen = strchr(str, '-');
+    if (!hyphen) {
+        decrRefCount(decoded);
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC logical separator");
+        freeClientAsync(c);
+        return;
     }
+
+    char *endptr1 = NULL;
+    char *endptr2 = NULL;
+    unsigned long long wall_val = strtoull(str, &endptr1, 10);
+    unsigned long long logical_val = strtoull(hyphen + 1, &endptr2, 10);
+    if (endptr1 != hyphen || endptr1 == str || endptr2 == (hyphen + 1) || *endptr2 != '\0' || wall_val == 0) {
+        decrRefCount(decoded);
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: bad HLC timestamp format");
+        freeClientAsync(c);
+        return;
+    }
+
+    hlc hlc_ts;
+    hlc_ts.wall_time = wall_val;
+    hlc_ts.logical = logical_val;
+    decrRefCount(decoded);
+
+    /* HLC receive/merge algorithm:
+     * 1. Find max wall clock time among physical time, local wall clock, and remote wall clock.
+     * 2. Adjust logical counter based on which clocks match the maximum wall clock.
+     * 3. Update the global clock. */
+
+    uint64_t physical_time = ustime();
+
+    /* masking of synchronization errors: if the sender's HLC wall
+     * time exceeds our physical time by more than the configured drift tolerance,
+     * ignore the remote wall time entirely. This prevents a node with a runaway
+     * or corrupted clock from polluting the cluster's HLC.
+     * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    if (server.hlc_max_clock_drift > 0 &&
+        hlc_ts.wall_time > physical_time + (uint64_t)server.hlc_max_clock_drift) {
+        serverLog(LL_WARNING, "Ignoring RREPLAY operation due to corrupted HLC timestamp (wall=%llu logical=%llu): %.3f ms ahead of local physical clock (drift tolerance %.3f ms).",
+                  (unsigned long long)hlc_ts.wall_time,
+                  (unsigned long long)hlc_ts.logical,
+                  (double)(hlc_ts.wall_time - physical_time) / 1000.0,
+                  (double)server.hlc_max_clock_drift / 1000.0);
+        if (from_primary_link) {
+            c->flag.skip_repl_stream_propagation = 1;
+        }
+        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
+        return;
+    } else {
+        uint64_t max_wall = server.hlc_clock.wall_time;
+        if (physical_time > max_wall) max_wall = physical_time;
+        if (hlc_ts.wall_time > max_wall) max_wall = hlc_ts.wall_time;
+
+        if (max_wall == server.hlc_clock.wall_time && max_wall == hlc_ts.wall_time) { /* Wall clocks are the same, compare logical ts */
+            server.hlc_clock.logical = (server.hlc_clock.logical > hlc_ts.logical ? server.hlc_clock.logical : hlc_ts.logical) + 1;
+        } else if (max_wall == server.hlc_clock.wall_time) {
+            server.hlc_clock.logical++;
+        } else if (max_wall == hlc_ts.wall_time) {
+            server.hlc_clock.logical = hlc_ts.logical + 1;
+        } else {
+            server.hlc_clock.logical = 0;
+        }
+        server.hlc_clock.wall_time = max_wall;
+    }
+
+    int payload_argc = c->argc - 5;
+    robj **payload_argv = c->argv + 5;
+    struct serverCommand *payload_cmd = lookupCommand(payload_argv, payload_argc);
     if (!payload_cmd) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: unknown command '%s'",
                   (char *)objectGetVal(payload_argv[0]));
@@ -3603,9 +3682,9 @@ void rreplayCommand(client *c) {
 
     robj **exec_payload_argv = NULL;
     int exec_payload_argc = 0;
-    if (payload_cmd->proc == msetCommand && mvcc_ts > 0 && dbid >= 0) {
-        exec_payload_argv = mvccBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, mvcc_ts, replay_tie_break,
-                                                      &exec_payload_argc);
+    if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
+        exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
+                                                     &exec_payload_argc);
         if (exec_payload_argv == NULL || exec_payload_argc <= 1) {
             if (from_primary_link) {
                 c->flag.skip_repl_stream_propagation = 1;
@@ -3613,7 +3692,7 @@ void rreplayCommand(client *c) {
             if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
             return;
         }
-    } else if (!mvccCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, mvcc_ts, replay_tie_break)) {
+    } else if (!hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
         if (from_primary_link) {
             c->flag.skip_repl_stream_propagation = 1;
         }
@@ -3667,7 +3746,7 @@ void rreplayCommand(client *c) {
     /* Keep AOF propagation behavior, but avoid direct command replication.
      * The raw RREPLAY frame is forwarded through the replication stream path. */
     call(exec_client, CMD_CALL_PROPAGATE_AOF);
-    mvccStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, mvcc_ts, replay_tie_break);
+    hlcStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, hlc_ts, replay_tie_break);
     if (exec_client->flag.blocked) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: payload command '%s' blocked", payload_cmd->fullname);
         freeClient(exec_client);
@@ -4475,7 +4554,7 @@ void replicaAfterLoadPrimaryRDB(connection *conn, rdbSaveInfo *rsi, int disk_bas
      * during FULLRESYNC, otherwise peers may inherit each other's upstream
      * topology (including self-references). */
     syncUpstreamRuntimeWithConfigured();
-    replicationApplyRdbMVCCState(rsi);
+    replicationApplyRdbHLCState(rsi);
     replicationApplyRdbRReplaySeen(rsi);
 
     /* Final setup of the connected replica <- primary link */

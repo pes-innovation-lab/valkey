@@ -152,8 +152,9 @@ struct ValkeyModule;
 #define CONFIG_RUN_ID_SIZE 40
 #define RDB_EOF_MARK_SIZE 40
 #define CONFIG_REPL_BACKLOG_MIN_SIZE (1024 * 16) /* 16k */
-#define CONFIG_DEFAULT_MVCC_RDB_CLOCK_MAX_ENTRIES 200000
+#define CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES 200000
 #define CONFIG_DEFAULT_RREPLAY_PENDING_MAX_ENTRIES 50000
+#define CONFIG_DEFAULT_HLC_MAX_CLOCK_DRIFT_USEC 500000 /* Default HLC drift tolerance: 500 ms in microseconds. https://cse.buffalo.edu/tech-reports/2014-04.pdf  */
 #define CONFIG_BGSAVE_RETRY_DELAY 5              /* Wait a few secs before trying again. */
 #define CONFIG_DEFAULT_PID_FILE "/var/run/valkey.pid"
 #define CONFIG_DEFAULT_BINDADDR_COUNT 2
@@ -1605,6 +1606,28 @@ typedef enum {
     PROPAGATION_ERR_BEHAVIOR_PANIC_ON_REPLICAS
 } replicationErrorBehavior;
 
+/* Hybrid Logical Clock (HLC) representation */
+typedef struct {
+    uint64_t wall_time;
+    uint64_t logical;
+} hlc;
+
+/* Compare two hybrid logical clocks. Returns:
+ * 1 if a > b,
+ * -1 if a < b,
+ * 0 if a == b 
+ *
+ * This first checks wall_time
+ * and falls back to logical to break ties.
+ */
+static inline int hlcCompare(const hlc *a, const hlc *b) {
+    if (a->wall_time > b->wall_time) return 1;
+    if (a->wall_time < b->wall_time) return -1;
+    if (a->logical > b->logical) return 1;
+    if (a->logical < b->logical) return -1;
+    return 0;
+}
+
 /* A configured upstream endpoint. For now this is a scaffold that mirrors
  * the legacy single primary configuration. */
 typedef struct valkeyUpstream {
@@ -1666,11 +1689,11 @@ typedef struct rdbSaveInfo {
     sds *repl_runtime_pending_entries;    /* Pending entries encoded as "<runtime-idx:u64><replay-id:u64><resp-frame-bytes...>". */
     int rreplay_seen_count;               /* Number of persisted dedupe keys from RREPLAY. */
     sds *rreplay_seen_entries;            /* Dedupe keys encoded as "<origin-uuid>:<replay-id>". */
-    uint64_t mvcc_clock;                  /* Global MVCC logical clock persisted in RDB AUX. */
-    dict *mvcc_key_clock;                 /* Encoded key clock map loaded from RDB AUX. */
+    hlc hlc_clock;                        /* Global HLC logical clock persisted in RDB AUX. */
+    dict *hlc_key_clock;                  /* Encoded key clock map loaded from RDB AUX. */
 } rdbSaveInfo;
 
-#define RDB_SAVE_INFO_INIT {-1, 0, "0000000000000000000000000000000000000000", -1, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL}
+#define RDB_SAVE_INFO_INIT {-1, 0, "0000000000000000000000000000000000000000", -1, 0, NULL, 0, NULL, 0, NULL, 0, NULL, {0, 0}, NULL}
 
 struct malloc_stats {
     size_t zmalloc_used;
@@ -2205,11 +2228,12 @@ struct valkeyServer {
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
     long long rreplay_pending_max_entries; /* Per-upstream pending replay frame queue cap. */
-    dict *mvcc_key_clock; /* Key-level LWW clock map. Key: binary(dbid)+key-bytes, Value: uint64_t*. */
-    dict *mvcc_key_tie_break; /* Deterministic tie-break map. Key: binary(dbid)+key-bytes, Value: zstrdup("<uuid>:<id>"). */
-    uint64_t mvcc_clock;  /* Monotonic local logical clock used by replay frames. */
-    long long mvcc_rdb_clock_max_entries; /* Configurable cap for persisted MVCC key clocks in RDB AUX. */
-    unsigned long long mvcc_rdb_clock_entries_dropped_last_save; /* Last RDB save: valid MVCC entries omitted by cap. */
+    dict *hlc_key_clock; /* Key-level LWW clock map. Key: binary(dbid)+key-bytes, Value: hlc*. */
+    dict *hlc_key_tie_break; /* Deterministic tie-break map. Key: binary(dbid)+key-bytes, Value: zstrdup("<uuid>:<id>"). */
+    hlc hlc_clock;  /* Hybrid logical clock */
+    long long hlc_rdb_clock_max_entries; /* Configurable cap for persisted HLC key clocks in RDB AUX. */
+    unsigned long long hlc_rdb_clock_entries_dropped_last_save; /* Last RDB save: valid HLC entries omitted by cap. */
+    long long hlc_max_clock_drift; /* Max tolerated microseconds between HLC wall time and physical time (0 = disabled). */
     char *primary_user;     /* AUTH with this user and primary_auth with primary */
     sds primary_auth;       /* AUTH with this password with primary */
     char *primary_host;     /* Hostname of primary */
@@ -3274,9 +3298,9 @@ void replicationUnsetPrimary(void);
 void replicationApplyRdbConfiguredUpstreams(const rdbSaveInfo *rsi);
 void replicationApplyRdbUpstreamRuntimeState(const rdbSaveInfo *rsi);
 void replicationApplyRdbRReplaySeen(const rdbSaveInfo *rsi);
-void replicationApplyRdbMVCCState(const rdbSaveInfo *rsi);
-uint64_t replicationMVCCGetKeyClock(int dbid, robj *key);
-void replicationMVCCSetKeyClock(int dbid, robj *key, uint64_t ts);
+void replicationApplyRdbHLCState(const rdbSaveInfo *rsi);
+hlc replicationHLCGetKeyClock(int dbid, robj *key);
+void replicationHLCSetKeyClock(int dbid, robj *key, hlc ts);
 void refreshGoodReplicasCount(void);
 int checkGoodReplicasStatus(void);
 void processClientsWaitingReplicas(void);
@@ -4206,7 +4230,7 @@ void clusterKeySlotCommand(client *c);
 void clusterSlotStatsCommand(client *c);
 void clusterscanCommand(client *c);
 void restoreCommand(client *c);
-void mvccrestoreCommand(client *c);
+void hlcrestoreCommand(client *c);
 void migrateCommand(client *c);
 void askingCommand(client *c);
 void readonlyCommand(client *c);

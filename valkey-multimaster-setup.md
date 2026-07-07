@@ -9,7 +9,7 @@ This setup is for validation/testing, not a production rollout guide.
 Implemented behavior in this branch includes:
 1. Multi-master replication with RW peers (`active-replica yes` + `multi-master yes`).
 2. `RREPLAY` forwarding with anti-loop and dedupe behavior.
-3. MVCC/LWW conflict handling.
+3. HLC/LWW conflict handling.
 4. Runtime observability and replay counters in `INFO replication`.
 
 ## 2) Build is required
@@ -222,7 +222,7 @@ valkey-cli -p 6379 CONFIG SET multi-master-no-forward no
 
 1. There is no single global leader in MM mode; both masters are RW.
 2. Replication is asynchronous.
-3. During network churn/partitions, convergence depends on MVCC/LWW + replay dedupe windows.
+3. During network churn/partitions, convergence depends on HLC/LWW + replay dedupe windows.
 4. Treat this guide as an experimental validation setup.
 
 PS: Are you guys getting weekends?
