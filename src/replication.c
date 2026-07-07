@@ -1215,17 +1215,14 @@ void replicationApplyRdbHLCState(const rdbSaveInfo *rsi) {
      * node had a bad clock). Resetting here prevents one stale RDB from
      * inflating the cluster HLC on restart.
      * https://cse.buffalo.edu/tech-reports/2014-04.pdf */
+    server.hlc_clock = rsi->hlc_clock;
     if (server.hlc_max_clock_drift > 0 && rsi->hlc_clock.wall_time != 0) {
         uint64_t pt = ustime();
         if (rsi->hlc_clock.wall_time > pt + (uint64_t)server.hlc_max_clock_drift) {
             serverLog(LL_WARNING, "RDB HLC wall time (%.3f ms ahead of physical clock) exceeds hlc-max-clock-drift; resetting to physical time.", (double)(rsi->hlc_clock.wall_time - pt) / 1000.0);
             server.hlc_clock.wall_time = pt;
             server.hlc_clock.logical = 0;
-        } else {
-            server.hlc_clock = rsi->hlc_clock;
         }
-    } else {
-        server.hlc_clock = rsi->hlc_clock;
     }
     if (rsi->hlc_key_clock == NULL) return;
 
