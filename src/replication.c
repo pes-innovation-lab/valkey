@@ -562,9 +562,19 @@ static void queueUpstreamForwardCommand(client *c, int argc, const char **argv, 
     }
 }
 
-// ATHARVA: need these forward decarations to make the modifications to this function work
-static const char *upstreamForwardAdvertisedHost(void);
-static int upstreamForwardAdvertisedPort(void);
+
+// ATHARVA
+static const char *upstreamForwardAdvertisedHost(void) {
+    if (server.replica_announce_ip && server.replica_announce_ip[0] != '\0') return server.replica_announce_ip;
+    if (server.bindaddr_count > 0 && server.bindaddr[0] && server.bindaddr[0][0] != '\0') return server.bindaddr[0];
+    return "127.0.0.1";
+}
+
+static int upstreamForwardAdvertisedPort(void) {
+    if (server.replica_announce_port > 0) return server.replica_announce_port;
+    if (server.tls_replication && server.tls_port > 0) return server.tls_port;
+    return server.port;
+}
 
 static void queueUpstreamForwardHandshake(client *c) {
     if (c == NULL) return;
@@ -609,17 +619,6 @@ static void queueUpstreamForwardHandshake(client *c) {
     }
 }
 
-static const char *upstreamForwardAdvertisedHost(void) {
-    if (server.replica_announce_ip && server.replica_announce_ip[0] != '\0') return server.replica_announce_ip;
-    if (server.bindaddr_count > 0 && server.bindaddr[0] && server.bindaddr[0][0] != '\0') return server.bindaddr[0];
-    return "127.0.0.1";
-}
-
-static int upstreamForwardAdvertisedPort(void) {
-    if (server.replica_announce_port > 0) return server.replica_announce_port;
-    if (server.tls_replication && server.tls_port > 0) return server.tls_port;
-    return server.port;
-}
 
 static void upstreamRuntimeRequestPeerFullResync(valkeyUpstreamRuntime *runtime) {
     if (runtime == NULL || runtime->link_client == NULL) return;
@@ -6947,8 +6946,6 @@ void multimasterCommand(client *c){
             const char *ip =  upstreamForwardAdvertisedHost();
             sds portstr = getReplicaPortString();
 
-            size_t ip_lens[] = {8,10,strlen(ip)};
-            size_t port_lens[] = {8, 14, sdslen(portstr)};
 
             listNode *ln;
             ln = listFirst(server.upstream_runtime);
