@@ -1,0 +1,70 @@
+{
+    "MULTIMASTER": {
+        "summary": "Configures a server as an active active replication target of another.",
+        "complexity": "O(1)",
+        "group": "server",
+        "since": "5.0.0",
+        "arity": -2,
+        "function": "multimasterCommand",
+        "command_flags": ["NO_ASYNC_LOADING", "ADMIN", "NOSCRIPT", "STALE"],
+        "arguments": [
+            {
+                "name": "args",
+                "type": "oneof",
+                "arguments": [
+                    {
+                        "name": "host-port",
+                        "type": "block",
+                        "arguments": [
+                            {
+                                "name": "host",
+                                "type": "string"
+                            },
+                            {
+                                "name": "port",
+                                "type": "integer"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "add-host-port",
+                        "type": "block",
+                        "arguments": [
+                            {
+                                "name": "add",
+                                "type": "pure-token",
+                                "token": "ADD"
+                            },
+                            {
+                                "name": "host",
+                                "type": "string"
+                            },
+                            {
+                                "name": "port",
+                                "type": "integer"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "remove",
+                        "type": "block",
+                        "arguments": [
+                            {
+                                "name": "remove",
+                                "type": "pure-token",
+                                "token": "REMOVE"
+                            }
+                            
+                        ]
+                    }
+                ]
+            }
+        ],
+        "reply_schema": {
+            "description": "ReplicaOf status.",
+            "type": "string",
+            "pattern": "OK*"
+        },
+        "acl_categories": ["ADMIN", "DANGEROUS", "SLOW"]
+    }
+}
