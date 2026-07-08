@@ -6949,6 +6949,23 @@ void multimasterCommand(client *c){
         // int removing_current =
         //     server.primary_host && !strcasecmp(server.primary_host, objectGetVal(c->argv[2])) && server.primary_port == port;
         if(c->argc == 2){
+            {
+                listIter li;
+                listNode *ln;
+                listRewind(server.upstream_runtime, &li);
+                while ((ln = listNext(&li)) != NULL) {
+                    valkeyUpstreamRuntime *runtime = listNodeValue(ln);
+                    char ip[NET_IP_STR_LEN];
+                    int port;
+                    connAddrPeerName(c->conn,ip,sizeof(ip),&port);
+                    if(runtime && !strcasecmp(runtime->host,ip)){
+                        removeConfiguredUpstreamEndpoint(runtime->host,runtime->port);
+                        addReply(c,shared.ok);
+                        return;
+                    }
+                }
+            }
+                
             sds portstr = getReplicaPortString();
 
 
@@ -6960,23 +6977,17 @@ void multimasterCommand(client *c){
                 if (runtime->link_client && runtime->link_client->conn) {
                     char ip[NET_IP_STR_LEN];
                     connAddrSockName(runtime->link_client->conn, ip, sizeof(ip), NULL);
-                    const char *argv[] = {"MULTIMASTER","remove", ip, portstr};
-                    size_t argv_lens[] = {11,6, strlen(ip), sdslen(portstr)};
-                    queueUpstreamForwardCommand(runtime->link_client,4,argv,argv_lens);
+                    const char *argv[] = {"MULTIMASTER","remove"};
+                    size_t argv_lens[] = {11,6};
+                    queueUpstreamForwardCommand(runtime->link_client,2,argv,argv_lens);
                     writeToClient(runtime->link_client);
                 }
                 removeConfiguredUpstreamEndpoint(runtime->host,runtime->port);
                 ln=next;
             }
             sdsfree(portstr);
-        }
-        else{
-            if (getRangeLongFromObjectOrReply(c, c->argv[3], 0, 65535, &port, "Invalid master port") != C_OK) return;
-            if (removeConfiguredUpstreamEndpoint(objectGetVal(c->argv[2]), port) != C_OK) {
-            addReplyError(c, "No such configured upstream");
+            addReply(c, shared.ok);
             return;
-        }
-            
         }
 
         
@@ -6989,7 +7000,7 @@ void multimasterCommand(client *c){
         //         if (next && next->host) replicationSetPrimary(next->host, next->port, 0, true);
         //     }
         // }
-        addReply(c, shared.ok);
+        addReplyErrorObject(c, shared.syntaxerr);
         return;
     }
 
