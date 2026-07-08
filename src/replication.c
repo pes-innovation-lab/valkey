@@ -563,7 +563,7 @@ static void queueUpstreamForwardCommand(client *c, int argc, const char **argv, 
 }
 
 
-// ATHARVA
+
 static const char *upstreamForwardAdvertisedHost(void) {
     if (server.replica_announce_ip && server.replica_announce_ip[0] != '\0') return server.replica_announce_ip;
     if (server.bindaddr_count > 0 && server.bindaddr[0] && server.bindaddr[0][0] != '\0') return server.bindaddr[0];
@@ -596,16 +596,16 @@ static void queueUpstreamForwardHandshake(client *c) {
 
     {
         // ATHARVA: we need to tell peer link that this node also needs to be added as an upstream
-        const char *ip =  upstreamForwardAdvertisedHost();
-        const char *address_argv[] = {"REPLCONF", "ip-address", ip};
-        size_t ip_lens[] = {8,10,strlen(ip)};
-        queueUpstreamForwardCommand(c,3,address_argv,ip_lens);
+        // const char *ip =  upstreamForwardAdvertisedHost();
+        // const char *address_argv[] = {"REPLCONF", "ip-address", ip};
+        // size_t ip_lens[] = {8,10,strlen(ip)};
+        // queueUpstreamForwardCommand(c,3,address_argv,ip_lens);
 
-        sds portstr = getReplicaPortString();
-        const char *port_argv[] = {"REPLCONF", "listening-port", portstr};
-        size_t port_lens[] = {8, 14, sdslen(portstr)};
-        queueUpstreamForwardCommand(c, 3, port_argv, port_lens);
-        sdsfree(portstr);
+        // sds portstr = getReplicaPortString();
+        // const char *port_argv[] = {"REPLCONF", "listening-port", portstr};
+        // size_t port_lens[] = {8, 14, sdslen(portstr)};
+        // queueUpstreamForwardCommand(c, 3, port_argv, port_lens);
+        // sdsfree(portstr);
 
         const char *capa_argv[] = {"REPLCONF", "capa", REPLICA_CAPA_RREPLAY_PEER_STR};
         size_t capa_lens[] = {8, 4, strlen(REPLICA_CAPA_RREPLAY_PEER_STR)};
@@ -617,6 +617,12 @@ static void queueUpstreamForwardHandshake(client *c) {
         queueUpstreamForwardCommand(c, 3, uuid_argv, uuid_lens);
 
     }
+        const char ip[NET_IP_STR_LEN];
+        connAddrSockName(c->conn,ip,sizeof(ip),NULL);
+        sds portstr = getReplicaPortString();
+        const char *multimaster_peer_command[] = {"MULTIMASTER","ADD",ip,portstr};
+        size_t command_lens[] = {11, 3, strlen(ip),sdslen(portstr)};
+        queueUpstreamForwardCommand(c,4,multimaster_peer_command,command_lens);
 }
 
 
@@ -3412,10 +3418,10 @@ void replconfCommand(client *c) {
                 // ATHARVA: adds the upstream for the current replica. this hopefully allows bidirectional comms
                 // port works fine but A sends local ip so instead we'll use the ip from the conn struct
 
-                char addr[NET_IP_STR_LEN]; //first init
-                connAddrPeerName(c->conn,addr,sizeof(addr),NULL); // pull ip of peer with established connection
-                serverLog(LL_NOTICE, "Attempting bidirectional connect with %s port %d", addr, c->repl_data->replica_listening_port);
-                addConfiguredUpstreamEndpoint(addr, c->repl_data->replica_listening_port); // adds the ip as a upstream
+                // char addr[NET_IP_STR_LEN]; //first init
+                // connAddrPeerName(c->conn,addr,sizeof(addr),NULL); // pull ip of peer with established connection
+                // serverLog(LL_NOTICE, "Attempting bidirectional connect with %s port %d", addr, c->repl_data->replica_listening_port);
+                // addConfiguredUpstreamEndpoint(addr, c->repl_data->replica_listening_port); // adds the ip as a upstream
             }
         } else if (!strcasecmp(objectGetVal(c->argv[j]), "ack")) {
             /* REPLCONF ACK is used by replica to inform the primary the amount
