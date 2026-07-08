@@ -564,17 +564,17 @@ static void queueUpstreamForwardCommand(client *c, int argc, const char **argv, 
 
 
 
-static const char *upstreamForwardAdvertisedHost(void) {
-    if (server.replica_announce_ip && server.replica_announce_ip[0] != '\0') return server.replica_announce_ip;
-    if (server.bindaddr_count > 0 && server.bindaddr[0] && server.bindaddr[0][0] != '\0') return server.bindaddr[0];
-    return "127.0.0.1";
-}
+// static const char *upstreamForwardAdvertisedHost(void) {
+//     if (server.replica_announce_ip && server.replica_announce_ip[0] != '\0') return server.replica_announce_ip;
+//     if (server.bindaddr_count > 0 && server.bindaddr[0] && server.bindaddr[0][0] != '\0') return server.bindaddr[0];
+//     return "127.0.0.1";
+// }
 
-static int upstreamForwardAdvertisedPort(void) {
-    if (server.replica_announce_port > 0) return server.replica_announce_port;
-    if (server.tls_replication && server.tls_port > 0) return server.tls_port;
-    return server.port;
-}
+// static int upstreamForwardAdvertisedPort(void) {
+//     if (server.replica_announce_port > 0) return server.replica_announce_port;
+//     if (server.tls_replication && server.tls_port > 0) return server.tls_port;
+//     return server.port;
+// }
 
 static void queueUpstreamForwardHandshake(client *c) {
     if (c == NULL) return;
@@ -617,7 +617,7 @@ static void queueUpstreamForwardHandshake(client *c) {
         queueUpstreamForwardCommand(c, 3, uuid_argv, uuid_lens);
 
     }
-        const char ip[NET_IP_STR_LEN];
+        char ip[NET_IP_STR_LEN];
         connAddrSockName(c->conn,ip,sizeof(ip),NULL);
         sds portstr = getReplicaPortString();
         const char *multimaster_peer_command[] = {"MULTIMASTER","ADD",ip,portstr};
@@ -6930,7 +6930,6 @@ void multimasterCommand(client *c){
 
         // removes the node from the entire mesh and sends a remove command to tell all the other nodes to selectively remove this node.
     } else if (!strcasecmp(objectGetVal(c->argv[1]), "remove")) {
-        long port;
         if (!server.multi_master) {
             addReplyError(c, "MULTIMASTER REMOVE requires multi-master yes");
             return;
