@@ -27,44 +27,6 @@
                         ]
                     },
                     {
-                        "name": "add-host-port",
-                        "type": "block",
-                        "arguments": [
-                            {
-                                "name": "add",
-                                "type": "pure-token",
-                                "token": "ADD"
-                            },
-                            {
-                                "name": "host",
-                                "type": "string"
-                            },
-                            {
-                                "name": "port",
-                                "type": "integer"
-                            }
-                        ]
-                    },
-                    {
-                        "name": "remove-host-port",
-                        "type": "block",
-                        "arguments": [
-                            {
-                                "name": "remove",
-                                "type": "pure-token",
-                                "token": "REMOVE"
-                            },
-                            {
-                                "name": "host",
-                                "type": "string"
-                            },
-                            {
-                                "name": "port",
-                                "type": "integer"
-                            }
-                        ]
-                    },
-                    {
                         "name": "no-one",
                         "type": "block",
                         "arguments": [

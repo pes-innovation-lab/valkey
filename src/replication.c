@@ -6925,30 +6925,19 @@ void multimasterCommand(client *c){
             addReplyError(c, "Failed to add upstream endpoint");
             return;
         }
-        //if (server.primary_host == NULL) {
-            //replicationSetPrimary(objectGetVal(c->argv[2]), port, 0, true);
-        //}
         addReply(c, shared.ok);
         return;
 
-        // ATHARVA: checks if host and ip are provided. if not it removes the node from the entire mesh and sends a remove command
-        // to tell all the other nodes to selectively remove this node.
+        // removes the node from the entire mesh and sends a remove command to tell all the other nodes to selectively remove this node.
     } else if (!strcasecmp(objectGetVal(c->argv[1]), "remove")) {
         long port;
         if (!server.multi_master) {
             addReplyError(c, "MULTIMASTER REMOVE requires multi-master yes");
             return;
         }
-
-        if (c->argc == 3){
-            addReplyError(c,"Please specify either no arguments or both ip and port");
-            return;
-        }
         
-
-        // int removing_current =
-        //     server.primary_host && !strcasecmp(server.primary_host, objectGetVal(c->argv[2])) && server.primary_port == port;
         if(c->argc == 2){
+            // iterates through the upstream list to try and match the ip address that initiated the remove command
             {
                 listIter li;
                 listNode *ln;
@@ -6965,7 +6954,8 @@ void multimasterCommand(client *c){
                     }
                 }
             }
-                
+            
+            // upstream wasnt found so it removes all the runtimes in the runtime list
             sds portstr = getReplicaPortString();
 
 
@@ -6990,33 +6980,10 @@ void multimasterCommand(client *c){
             return;
         }
 
-        
-        // if (removing_current) {
-        //     if (listLength(server.upstreams) == 0) {
-        //         replicationUnsetPrimary();
-        //     } else {
-        //         listNode *ln = listFirst(server.upstreams);
-        //         valkeyUpstream *next = listNodeValue(ln);
-        //         if (next && next->host) replicationSetPrimary(next->host, next->port, 0, true);
-        //     }
-        // }
         addReplyErrorObject(c, shared.syntaxerr);
         return;
     }
 
-    // multimaster no one isnt required anymore
-    /* The special host/port combination "NO" "ONE" turns the instance
-     * into a primary. Otherwise the new primary address is set. */
-    // if (!strcasecmp(objectGetVal(c->argv[1]), "no") && !strcasecmp(objectGetVal(c->argv[2]), "one")) {
-    //     // ATHARVA: since we dont deal with primary nodes in multimaster, this isnt needed
-    //     // if (server.primary_host) {
-    //     //     replicationUnsetPrimary();
-    //     //     sds client = catClientInfoShortString(sdsempty(), c, server.hide_user_data_from_log);
-    //     //     serverLog(LL_NOTICE, "PRIMARY MODE enabled (user request from '%s')", client);
-    //     //     sdsfree(client);
-    //     // }
-    //     clearConfiguredUpstreams();
-    // }
 
 addReplyErrorObject(c, shared.syntaxerr);
 }
@@ -7034,56 +7001,6 @@ void replicaofCommand(client *c) {
         return;
     }
 
-    if (c->argc == 4 && !strcasecmp(objectGetVal(c->argv[1]), "add")) {
-        long port;
-        if (!server.multi_master) {
-            addReplyError(c, "REPLICAOF ADD requires multi-master yes");
-            return;
-        }
-        if (c->flag.replica) {
-            addReplyError(c, "Command is not valid when client is a replica.");
-            return;
-        }
-        if (getRangeLongFromObjectOrReply(c, c->argv[3], 0, 65535, &port, "Invalid master port") != C_OK) return;
-        if (addConfiguredUpstreamEndpoint(objectGetVal(c->argv[2]), port) != C_OK) {
-            addReplyError(c, "Failed to add upstream endpoint");
-            return;
-        }
-        //if (server.primary_host == NULL) {
-            //replicationSetPrimary(objectGetVal(c->argv[2]), port, 0, true);
-        //}
-        addReply(c, shared.ok);
-        return;
-    } else if (c->argc == 4 && !strcasecmp(objectGetVal(c->argv[1]), "remove")) {
-        long port;
-        if (!server.multi_master) {
-            addReplyError(c, "REPLICAOF REMOVE requires multi-master yes");
-            return;
-        }
-        if (getRangeLongFromObjectOrReply(c, c->argv[3], 0, 65535, &port, "Invalid master port") != C_OK) return;
-
-        int removing_current =
-            server.primary_host && !strcasecmp(server.primary_host, objectGetVal(c->argv[2])) && server.primary_port == port;
-        if (removeConfiguredUpstreamEndpoint(objectGetVal(c->argv[2]), port) != C_OK) {
-            addReplyError(c, "No such configured upstream");
-            return;
-        }
-
-        if (removing_current) {
-            if (listLength(server.upstreams) == 0) {
-                replicationUnsetPrimary();
-            } else {
-                listNode *ln = listFirst(server.upstreams);
-                valkeyUpstream *next = listNodeValue(ln);
-                if (next && next->host) replicationSetPrimary(next->host, next->port, 0, true);
-            }
-        }
-        addReply(c, shared.ok);
-        return;
-    } else if (c->argc != 3) {
-        addReplyErrorObject(c, shared.syntaxerr);
-        return;
-    }
 
     /* The special host/port combination "NO" "ONE" turns the instance
      * into a primary. Otherwise the new primary address is set. */
@@ -7109,10 +7026,6 @@ void replicaofCommand(client *c) {
         if (getRangeLongFromObjectOrReply(c, c->argv[2], 0, 65535, &port, "Invalid master port") != C_OK) return;
 
         if (server.multi_master) {
-            if (addConfiguredUpstreamEndpoint(objectGetVal(c->argv[1]), port) != C_OK) {
-                addReplyError(c, "Failed to add upstream endpoint");
-                return;
-            }
 
             if (server.primary_host == NULL) {
                 replicationSetPrimary(objectGetVal(c->argv[1]), port, 0, true);

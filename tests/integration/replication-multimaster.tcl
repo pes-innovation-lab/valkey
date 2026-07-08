@@ -11,14 +11,14 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
 
     if {$topology eq "mesh"} {
         # Star mesh anchored at node0 (stable with current active-upstream runtime).
-        $R(1) replicaof add $RH(0) $RP(0)
-        $R(2) replicaof add $RH(0) $RP(0)
-        $R(3) replicaof add $RH(0) $RP(0)
+        $R(1) multimaster add $RH(0) $RP(0)
+        $R(2) multimaster add $RH(0) $RP(0)
+        $R(3) multimaster add $RH(0) $RP(0)
     } else {
         # Ring-like chain rooted at node0.
-        $R(1) replicaof add $RH(0) $RP(0)
-        $R(2) replicaof add $RH(1) $RP(1)
-        $R(3) replicaof add $RH(2) $RP(2)
+        $R(1) multimaster add $RH(0) $RP(0)
+        $R(2) multimaster add $RH(1) $RP(1)
+        $R(3) multimaster add $RH(2) $RP(2)
     }
 
     test "$topology all nodes up" {

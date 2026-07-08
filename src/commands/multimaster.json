@@ -44,20 +44,20 @@
                                 "type": "integer"
                             }
                         ]
-                    },
-                    {
-                        "name": "remove",
-                        "type": "block",
-                        "arguments": [
-                            {
-                                "name": "remove",
-                                "type": "pure-token",
-                                "token": "REMOVE"
-                            }
-                            
-                        ]
                     }
                 ]
+
+                
+            },
+            {
+
+                    
+                "name": "remove",
+                "type": "pure-token",
+                "token": "REMOVE"
+                    
+                    
+                
             }
         ],
         "reply_schema": {
