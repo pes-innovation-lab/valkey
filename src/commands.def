@@ -7807,6 +7807,37 @@ struct COMMAND_ARG FLUSHDB_Args[] = {
 {MAKE_ARG("flush-type",ARG_TYPE_ONEOF,-1,NULL,NULL,NULL,CMD_ARG_OPTIONAL,2,NULL),.subargs=FLUSHDB_flush_type_Subargs},
 };
 
+/********** HLCRESTORE ********************/
+
+#ifndef SKIP_CMD_HISTORY_TABLE
+/* HLCRESTORE history */
+#define HLCRESTORE_History NULL
+#endif
+
+#ifndef SKIP_CMD_TIPS_TABLE
+/* HLCRESTORE tips */
+#define HLCRESTORE_Tips NULL
+#endif
+
+#ifndef SKIP_CMD_KEY_SPECS_TABLE
+/* HLCRESTORE key specs */
+keySpec HLCRESTORE_Keyspecs[1] = {
+{NULL,CMD_KEY_OW|CMD_KEY_UPDATE,KSPEC_BS_INDEX,.bs.index={1},KSPEC_FK_RANGE,.fk.range={0,1,0}}
+};
+#endif
+
+/* HLCRESTORE argument table */
+struct COMMAND_ARG HLCRESTORE_Args[] = {
+{MAKE_ARG("key",ARG_TYPE_KEY,0,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
+{MAKE_ARG("ttl",ARG_TYPE_INTEGER,-1,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
+{MAKE_ARG("serialized-value",ARG_TYPE_STRING,-1,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
+{MAKE_ARG("hlc-ts",ARG_TYPE_INTEGER,-1,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
+{MAKE_ARG("replace",ARG_TYPE_PURE_TOKEN,-1,"REPLACE",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
+{MAKE_ARG("absttl",ARG_TYPE_PURE_TOKEN,-1,"ABSTTL",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
+{MAKE_ARG("seconds",ARG_TYPE_INTEGER,-1,"IDLETIME",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
+{MAKE_ARG("frequency",ARG_TYPE_INTEGER,-1,"FREQ",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
+};
+
 /********** INFO ********************/
 
 #ifndef SKIP_CMD_HISTORY_TABLE
@@ -8375,16 +8406,16 @@ struct COMMAND_STRUCT MODULE_Subcommands[] = {
 #define MONITOR_Keyspecs NULL
 #endif
 
-/********** HLCRESTORE ********************/
+/********** MULTIMASTER ********************/
 
 #ifndef SKIP_CMD_HISTORY_TABLE
-/* HLCRESTORE history */
-#define HLCRESTORE_History NULL
+/* MULTIMASTER history */
+#define MULTIMASTER_History NULL
 #endif
 
 #ifndef SKIP_CMD_TIPS_TABLE
-/* HLCRESTORE tips */
-#define HLCRESTORE_Tips NULL
+/* MULTIMASTER tips */
+#define MULTIMASTER_Tips NULL
 #endif
 
 #ifndef SKIP_CMD_KEY_SPECS_TABLE
@@ -8415,37 +8446,6 @@ struct COMMAND_ARG MULTIMASTER_args_Subargs[] = {
 struct COMMAND_ARG MULTIMASTER_Args[] = {
 {MAKE_ARG("args",ARG_TYPE_ONEOF,-1,NULL,NULL,NULL,CMD_ARG_NONE,2,NULL),.subargs=MULTIMASTER_args_Subargs},
 {MAKE_ARG("remove",ARG_TYPE_PURE_TOKEN,-1,"REMOVE",NULL,NULL,CMD_ARG_NONE,0,NULL)},
-};
-
-/********** MVCCRESTORE ********************/
-
-#ifndef SKIP_CMD_HISTORY_TABLE
-/* MVCCRESTORE history */
-#define MVCCRESTORE_History NULL
-#endif
-
-#ifndef SKIP_CMD_TIPS_TABLE
-/* MVCCRESTORE tips */
-#define MVCCRESTORE_Tips NULL
-#endif
-
-#ifndef SKIP_CMD_KEY_SPECS_TABLE
-/* MVCCRESTORE key specs */
-keySpec MVCCRESTORE_Keyspecs[1] = {
-{NULL,CMD_KEY_OW|CMD_KEY_UPDATE,KSPEC_BS_INDEX,.bs.index={1},KSPEC_FK_RANGE,.fk.range={0,1,0}}
-};
-#endif
-
-/* HLCRESTORE argument table */
-struct COMMAND_ARG HLCRESTORE_Args[] = {
-{MAKE_ARG("key",ARG_TYPE_KEY,0,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
-{MAKE_ARG("ttl",ARG_TYPE_INTEGER,-1,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
-{MAKE_ARG("serialized-value",ARG_TYPE_STRING,-1,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
-{MAKE_ARG("hlc-ts",ARG_TYPE_INTEGER,-1,NULL,NULL,NULL,CMD_ARG_NONE,0,NULL)},
-{MAKE_ARG("replace",ARG_TYPE_PURE_TOKEN,-1,"REPLACE",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
-{MAKE_ARG("absttl",ARG_TYPE_PURE_TOKEN,-1,"ABSTTL",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
-{MAKE_ARG("seconds",ARG_TYPE_INTEGER,-1,"IDLETIME",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
-{MAKE_ARG("frequency",ARG_TYPE_INTEGER,-1,"FREQ",NULL,NULL,CMD_ARG_OPTIONAL,0,NULL)},
 };
 
 /********** PSYNC ********************/
@@ -12094,6 +12094,7 @@ struct COMMAND_STRUCT serverCommandTable[] = {
 {MAKE_CMD("failover","Starts a coordinated failover from a server to one of its replicas.","O(1)","6.2.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,FAILOVER_History,0,FAILOVER_Tips,0,failoverCommand,-1,CMD_ADMIN|CMD_NOSCRIPT|CMD_STALE,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,FAILOVER_Keyspecs,0,NULL,3),.args=FAILOVER_Args},
 {MAKE_CMD("flushall","Removes all keys from all databases.","O(N) where N is the total number of keys in all databases","1.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,FLUSHALL_History,2,FLUSHALL_Tips,2,flushallCommand,-1,CMD_WRITE|CMD_ALL_DBS,ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_KEYSPACE|ACL_CATEGORY_SLOW|ACL_CATEGORY_WRITE,NULL,FLUSHALL_Keyspecs,0,NULL,1),.args=FLUSHALL_Args},
 {MAKE_CMD("flushdb","Removes all keys from the current database.","O(N) where N is the number of keys in the selected database","1.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,FLUSHDB_History,2,FLUSHDB_Tips,2,flushdbCommand,-1,CMD_WRITE,ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_KEYSPACE|ACL_CATEGORY_SLOW|ACL_CATEGORY_WRITE,NULL,FLUSHDB_Keyspecs,0,NULL,1),.args=FLUSHDB_Args},
+{MAKE_CMD("hlcrestore","Restores a key from serialized payload with an explicit HLC timestamp.","O(1) to create the new key and additional O(N*M) to reconstruct the serialized value, where N is the number of objects composing the value and M their average size.","255.255.255",CMD_DOC_SYSCMD,NULL,NULL,"server",COMMAND_GROUP_SERVER,HLCRESTORE_History,0,HLCRESTORE_Tips,0,hlcrestoreCommand,-5,CMD_WRITE|CMD_DENYOOM,ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_KEYSPACE|ACL_CATEGORY_SLOW|ACL_CATEGORY_WRITE,NULL,HLCRESTORE_Keyspecs,1,NULL,8),.args=HLCRESTORE_Args},
 {MAKE_CMD("info","Returns information and statistics about the server.","O(1)","1.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,INFO_History,1,INFO_Tips,3,infoCommand,-1,CMD_LOADING|CMD_STALE|CMD_SENTINEL,ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,INFO_Keyspecs,0,NULL,1),.args=INFO_Args},
 {MAKE_CMD("lastsave","Returns the Unix timestamp of the last successful save to disk.","O(1)","1.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,LASTSAVE_History,0,LASTSAVE_Tips,1,lastsaveCommand,1,CMD_LOADING|CMD_STALE|CMD_FAST,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_FAST,NULL,LASTSAVE_Keyspecs,0,NULL,0)},
 {MAKE_CMD("latency","A container for latency diagnostics commands.","Depends on subcommand.","2.8.13",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,LATENCY_History,0,LATENCY_Tips,0,NULL,-2,0,ACL_CATEGORY_SLOW,NULL,LATENCY_Keyspecs,0,NULL,0),.subcommands=LATENCY_Subcommands},
@@ -12101,8 +12102,7 @@ struct COMMAND_STRUCT serverCommandTable[] = {
 {MAKE_CMD("memory","A container for memory diagnostics commands.","Depends on subcommand.","4.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,MEMORY_History,0,MEMORY_Tips,0,NULL,-2,0,ACL_CATEGORY_SLOW,NULL,MEMORY_Keyspecs,0,NULL,0),.subcommands=MEMORY_Subcommands},
 {MAKE_CMD("module","A container for module commands.","Depends on subcommand.","4.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,MODULE_History,0,MODULE_Tips,0,NULL,-2,0,ACL_CATEGORY_SLOW,NULL,MODULE_Keyspecs,0,NULL,0),.subcommands=MODULE_Subcommands},
 {MAKE_CMD("monitor","Listens for all requests received by the server in real-time.",NULL,"1.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,MONITOR_History,0,MONITOR_Tips,0,monitorCommand,1,CMD_ADMIN|CMD_NOSCRIPT|CMD_LOADING|CMD_STALE,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,MONITOR_Keyspecs,0,NULL,0)},
-{MAKE_CMD("multimaster","Configures a server as an active active replication target of another.","O(1)","5.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,MULTIMASTER_History,0,MULTIMASTER_Tips,0,multimasterCommand,-2,CMD_NO_ASYNC_LOADING|CMD_ADMIN|CMD_NOSCRIPT|CMD_STALE,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,MULTIMASTER_Keyspecs,0,NULL,1),.args=MULTIMASTER_Args},
-{MAKE_CMD("hlcrestore","Restores a key from serialized payload with an explicit HLC timestamp.","O(1) to create the new key and additional O(N*M) to reconstruct the serialized value, where N is the number of objects composing the value and M their average size.","255.255.255",CMD_DOC_SYSCMD,NULL,NULL,"server",COMMAND_GROUP_SERVER,HLCRESTORE_History,0,HLCRESTORE_Tips,0,hlcrestoreCommand,-5,CMD_WRITE|CMD_DENYOOM,ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_KEYSPACE|ACL_CATEGORY_SLOW|ACL_CATEGORY_WRITE,NULL,HLCRESTORE_Keyspecs,1,NULL,8),.args=HLCRESTORE_Args},
+{MAKE_CMD("multimaster","Configures a server as an active active replication target of another.","O(1)","5.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,MULTIMASTER_History,0,MULTIMASTER_Tips,0,multimasterCommand,-2,CMD_NO_ASYNC_LOADING|CMD_ADMIN|CMD_NOSCRIPT|CMD_STALE,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,MULTIMASTER_Keyspecs,0,NULL,2),.args=MULTIMASTER_Args},
 {MAKE_CMD("psync","An internal command used in replication.",NULL,"2.8.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,PSYNC_History,0,PSYNC_Tips,0,syncCommand,-3,CMD_NO_ASYNC_LOADING|CMD_ADMIN|CMD_NO_MULTI|CMD_NOSCRIPT,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,PSYNC_Keyspecs,0,NULL,2),.args=PSYNC_Args},
 {MAKE_CMD("replconf","An internal command for configuring the replication stream.","O(1)","3.0.0",CMD_DOC_SYSCMD,NULL,NULL,"server",COMMAND_GROUP_SERVER,REPLCONF_History,0,REPLCONF_Tips,0,replconfCommand,-1,CMD_ADMIN|CMD_NOSCRIPT|CMD_LOADING|CMD_STALE|CMD_ALLOW_BUSY,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,REPLCONF_Keyspecs,0,NULL,0)},
 {MAKE_CMD("replicaof","Configures a server as replica of another, or promotes it to a primary.","O(1)","5.0.0",CMD_DOC_NONE,NULL,NULL,"server",COMMAND_GROUP_SERVER,REPLICAOF_History,0,REPLICAOF_Tips,0,replicaofCommand,-3,CMD_NO_ASYNC_LOADING|CMD_ADMIN|CMD_NOSCRIPT|CMD_STALE,ACL_CATEGORY_ADMIN|ACL_CATEGORY_DANGEROUS|ACL_CATEGORY_SLOW,NULL,REPLICAOF_Keyspecs,0,NULL,1),.args=REPLICAOF_Args},
