@@ -1758,6 +1758,42 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
     return 1;
 }
 
+typedef struct {
+    int has_metadata; /* 0 for "none", 1 present. */
+    sds raw;          /* Raw metadata blob. Points into argv. */
+} crdtMetadata;
+
+/* Parse and validate the CRDT metadata field of an inbound RREPLAY frame.
+ * 
+ * 'meta' is the raw bulk-string value at index RREPLAY_CRDT_META_IDX.
+ * Returns `C_OK` and fills '*out' on success, or `C_ERR` on error.
+ * Currently only "none" sentinel is accepted, once more CRDTs parsings are implemented,
+ * we can add them here.
+ * per-CRDT branches will be added here as strategies are implemented. */
+static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, crdtMetadata *out) {
+    UNUSED(cmd);
+
+    out->raw = meta;
+    out->has_metadata = 0;
+
+    if (meta != NULL && !strcmp(meta, RREPLAY_CRDT_META_NONE)) return C_OK;
+
+    /* CRDT parsing for the different types go here.
+     * cc @Atharva, @Mahilan, Anirudh */
+    serverLog(LL_WARNING, "Unsupported CRDT metadata format: %s", meta ? meta : "(null)");
+    return C_ERR;
+}
+
+/* Produce the CRDT metadata field for an outbound RREPLAY frame. 
+ * Currently a stub that always emits the "none" sentinel; 
+ * per-command CRDT implementations will generate specific metadata here. (cc @Atharva, @Anirudh, @Mahilan) */
+static sds rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
+    UNUSED(cmd);
+    UNUSED(argv);
+    UNUSED(argc);
+    return sdsnew(RREPLAY_CRDT_META_NONE);
+}
+
 /* Return the pointer to a string representing the replica ip:listening_port
  * pair. Mostly useful for logging, since we want to log a replica using its
  * IP address and its listening port which is more clear for the user, for
