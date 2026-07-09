@@ -895,11 +895,30 @@ void replicationDetachUpstreamRuntimeClient(client *c) {
         runtime->replybuf = NULL;
     }
     runtime->link_client = NULL;
-    runtime->incoming_client = NULL;
+    /* Do NOT clear incoming_client here. It belongs to the incoming
+     * connection from the peer, which is independent of the outgoing
+     * link_client being detached. */
     runtime->active_link = 0;
     runtime->repl_state = REPL_STATE_NONE;
     runtime->reploff = (long long)runtime->replay_last_acked_id;
     runtime->last_io_sec = -1;
+}
+
+/* Clear incoming_client when the actual incoming connection from a peer
+ * is being freed. This is separate from replicationDetachUpstreamRuntimeClient
+ * which handles the outgoing link_client. */
+void replicationDetachUpstreamIncomingClient(client *c) {
+    if (server.upstream_runtime == NULL) return;
+    listIter li;
+    listNode *ln;
+    listRewind(server.upstream_runtime, &li);
+    while ((ln = listNext(&li)) != NULL) {
+        valkeyUpstreamRuntime *runtime = listNodeValue(ln);
+        if (runtime->incoming_client == c) {
+            runtime->incoming_client = NULL;
+            return;
+        }
+    }
 }
 
 static int addConfiguredUpstreamEndpoint(const char *host, int port) {
@@ -6928,13 +6947,35 @@ void multimasterCommand(client *c){
         }
         if(c->repl_data && (c->repl_data->replica_capa & REPLICA_CAPA_RREPLAY_PEER)){
             syncUpstreamRuntimeWithConfigured();
+
+            /* Only set incoming_client for the self-ADD (the first ADD a peer
+             * sends about itself), not for third-party ADDs (a peer telling us
+             * about other nodes).  The self-ADD is always sent first in the
+             * handshake, so if any runtime already has incoming_client == c
+             * we know the self-ADD was already processed. */
+            int already_claimed = 0;
+            {
+                listIter check_li;
+                listNode *check_ln;
+                listRewind(server.upstream_runtime, &check_li);
+                while ((check_ln = listNext(&check_li)) != NULL) {
+                    valkeyUpstreamRuntime *r = listNodeValue(check_ln);
+                    if (r->incoming_client == c) {
+                        already_claimed = 1;
+                        break;
+                    }
+                }
+            }
+
             listNode *ln;
             ln = listFirst(server.upstream_runtime);
             while(ln!=NULL){
                 listNode *next = listNextNode(ln);
                 valkeyUpstreamRuntime *runtime = listNodeValue(ln);
                 if (!strcasecmp(runtime->host,objectGetVal(c->argv[2])) && port==runtime->port){
-                    runtime->incoming_client = c;
+                    if (!already_claimed) {
+                        runtime->incoming_client = c;
+                    }
                     addReply(c,shared.ok);
                     return;
                 }
@@ -6953,6 +6994,7 @@ void multimasterCommand(client *c){
         }
         
         if(c->argc == 2){
+            if(c->repl_data && (c->repl_data->replica_capa & REPLICA_CAPA_RREPLAY_PEER))
             // iterates through the upstream list to try and match the ip address that initiated the remove command
             {
                 listIter li;
@@ -6968,18 +7010,15 @@ void multimasterCommand(client *c){
                 }
             }
             
-            // upstream wasnt found so it removes all the runtimes in the runtime list
-            sds portstr = getReplicaPortString();
-
-
+            else {
+            // Full mesh remove: local command. Forward remove to all peers,
+            // then tear down all local upstreams.
             listNode *ln;
             ln = listFirst(server.upstream_runtime);
             while(ln!=NULL){
                 listNode *next = listNextNode(ln);
                 valkeyUpstreamRuntime *runtime = listNodeValue(ln);
                 if (runtime->link_client && runtime->link_client->conn) {
-                    char ip[NET_IP_STR_LEN];
-                    connAddrSockName(runtime->link_client->conn, ip, sizeof(ip), NULL);
                     const char *argv[] = {"MULTIMASTER","remove"};
                     size_t argv_lens[] = {11,6};
                     queueUpstreamForwardCommand(runtime->link_client,2,argv,argv_lens);
@@ -6988,9 +7027,9 @@ void multimasterCommand(client *c){
                 removeConfiguredUpstreamEndpoint(runtime->host,runtime->port);
                 ln=next;
             }
-            sdsfree(portstr);
             addReply(c, shared.ok);
             return;
+        }
         }
 
         addReplyErrorObject(c, shared.syntaxerr);
