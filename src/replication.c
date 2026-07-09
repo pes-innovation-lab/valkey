@@ -2452,7 +2452,7 @@ static void forwardRawRReplayFrameToUpstreams(robj **argv, int argc, client *exc
 /* Encapsulate a locally generated command and send it upstream to the
  * connected primary as an active-active replay frame.
  *
- * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <command> [arg ...] */
+ * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <crdt-metadata> <command> [arg ...] */
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     if (dictid < 0 || argv == NULL || argc <= 0) return;
 
@@ -2501,7 +2501,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     snprintf(replay_tie_break, sizeof(replay_tie_break), "%s:%llu", server.runid, replay_id);
     hlcStampCommandKeys(payload_cmd, payload_argv, payload_argc, dictid, hlc_ts, replay_tie_break);
 
-    int frame_argc = payload_argc + 5;
+    int frame_argc = payload_argc + RREPLAY_PAYLOAD_START_IDX;
     robj **frame_argv = zmalloc(sizeof(robj *) * frame_argc);
     frame_argv[0] = createStringObject("RREPLAY", 7);
     frame_argv[1] = createStringObject(server.runid, CONFIG_RUN_ID_SIZE);
@@ -2514,9 +2514,14 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
                            (unsigned long long)hlc_ts.wall_time,
                            (unsigned long long)hlc_ts.logical);
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
+    /* CRDT metadata field (index 5). Currently the "none" sentinel; 
+     * future per-CRDT strategies will populate it via rreplayCrdtMetadataSerialize. */
+    sds crdt_meta = rreplayCrdtMetadataSerialize(payload_cmd, payload_argv, payload_argc);
+    frame_argv[RREPLAY_CRDT_META_IDX] = createStringObject(crdt_meta, sdslen(crdt_meta));
+    sdsfree(crdt_meta);
     for (int j = 0; j < payload_argc; j++) {
-        frame_argv[j + 5] = payload_argv[j];
-        incrRefCount(frame_argv[j + 5]);
+        frame_argv[j + RREPLAY_PAYLOAD_START_IDX] = payload_argv[j];
+        incrRefCount(frame_argv[j + RREPLAY_PAYLOAD_START_IDX]);
     }
 
     /* In active-replica multi-master mode, RREPLAY frames must enter the local
@@ -3534,7 +3539,8 @@ void replconfCommand(client *c) {
     addReply(c, shared.ok);
 }
 
-/* RREPLAY <origin-uuid> <dbid> <replay-id> [<hlc-ts>] <command> [arg ...]
+/* RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <crdt-metadata> <command> [arg ...]
+ *   idx:      1            2        3          4           5             6       7+
  * Internal active-active replay wrapper.
  *
  * Accepted from replication links and from internal multi-master peer links.
@@ -3555,7 +3561,7 @@ void rreplayCommand(client *c) {
      * wrapper command again via call() dirty accounting. */
     preventCommandPropagation(c);
 
-    if (c->argc < 5) {
+    if (c->argc < 6) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing payload command");
         freeClientAsync(c);
         return;
@@ -3607,8 +3613,8 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    if (c->argc < 6) {
-        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp or payload command");
+    if (c->argc < 7) {
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp, CRDT metadata or payload command");
         freeClientAsync(c);
         return;
     }
@@ -3680,13 +3686,23 @@ void rreplayCommand(client *c) {
         server.hlc_clock.wall_time = max_wall;
     }
 
-    int payload_argc = c->argc - 5;
-    robj **payload_argv = c->argv + 5;
+    int payload_argc = c->argc - RREPLAY_PAYLOAD_START_IDX;
+    robj **payload_argv = c->argv + RREPLAY_PAYLOAD_START_IDX;
     struct serverCommand *payload_cmd = lookupCommand(payload_argv, payload_argc);
     if (!payload_cmd) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: unknown command '%s'",
                   (char *)objectGetVal(payload_argv[0]));
         freeClientAsync(c);
+        return;
+    }
+
+    /* Validate the CRDT metadata field (id 5). 
+     * Skip unrecognized format - (rreplayCrdtMetadataParse emits the warning) */
+    crdtMetadata parsed_meta;
+    sds crdt_meta = objectGetVal(c->argv[RREPLAY_CRDT_META_IDX]);
+    if (rreplayCrdtMetadataParse(crdt_meta, payload_cmd, &parsed_meta) != C_OK) {
+        if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
+        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
         return;
     }
 
