@@ -2225,6 +2225,7 @@ struct valkeyServer {
     int active_replica;   /* If enabled, this node may accept writes while being a replica. */
     int multi_master;     /* If enabled, allow multiple configured upstreams (scaffold). */
     int multi_master_no_forward; /* If enabled, avoid forwarding replay traffic (scaffold). */
+    dict *crdt_whitelist; /* Dictionary containing CRDT-allowed commands for multi-master mode. */
     dict *rreplay_seen;   /* Recent replay frames for dedupe. Key: "<origin-uuid>:<replay-id>" */
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
@@ -3282,6 +3283,7 @@ ssize_t syncReadLine(int fd, char *ptr, ssize_t size, long long timeout);
 int prepareReplicasToWrite(void);
 void replicationFeedReplicas(int dictid, robj **argv, int argc);
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc);
+int isCrdtWhitelistedCommand(struct serverCommand *cmd);
 void replicationFeedStreamFromPrimaryStream(char *buf, size_t buflen);
 void replicationDetachUpstreamRuntimeClient(client *c);
 void resetReplicationBuffer(void);

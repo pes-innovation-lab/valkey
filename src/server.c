@@ -2388,6 +2388,7 @@ void initServerConfig(void) {
     server.active_replica = 0;
     server.multi_master = 0;
     server.multi_master_no_forward = 0;
+    server.crdt_whitelist = NULL;
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
@@ -2963,6 +2964,7 @@ void initServer(void) {
     server.monitors = listCreate();
     server.upstreams = listCreate();
     server.upstream_runtime = listCreate();
+    server.crdt_whitelist = dictCreate(&modulesDictType);
     server.rreplay_seen = dictCreate(&sdsHashDictType);
     server.rreplay_seen_order = listCreate();
     server.hlc_key_clock = dictCreate(&sdsKeyHeapPointerValueDictType);
@@ -3607,6 +3609,13 @@ int mustObeyClient(client *c) {
 
 bool clientSupportStandAloneRedirect(client *c) {
     return !server.cluster_enabled && server.primary_host && c->capa & CLIENT_CAPA_REDIRECT;
+}
+
+/* Check if a command is permitted by the CRDT whitelist for multi-master mode.
+ * Returns 1 if the command is explicitly listed. Returns 0 otherwise. */
+int isCrdtWhitelistedCommand(struct serverCommand *cmd) {
+    if (cmd == NULL) return 0;
+    return dictFind(server.crdt_whitelist, cmd->fullname) != NULL;
 }
 
 static int shouldForwardToPrimaryViaRReplay(int target) {
