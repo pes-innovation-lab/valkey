@@ -8,8 +8,8 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
     }
 
     test {PSYNC2 multi-master setup} {
-        $R(1) replicaof add $RH(0) $RP(0)
-        $R(2) replicaof add $RH(0) $RP(0)
+        $R(1) multimaster add $RH(0) $RP(0)
+        $R(2) multimaster add $RH(0) $RP(0)
 
         $R(0) set mm:seed ok
         wait_for_condition 100 100 {
