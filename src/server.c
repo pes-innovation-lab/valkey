@@ -4494,6 +4494,24 @@ int processCommand(client *c) {
         return C_OK;
     }
 
+    /* CRDT whitelist check for multi-master mode.
+     * A write command sent by an external client must have an explicit CRDT strategy,
+     * and if that is the case, the command must be whitelisted in the config,
+     * otherwise it is rejected here. 
+     * So it is neither applied locally nor forwarded via RREPLAY, 
+     * this ensures peers don't diverge.
+     *
+     * Skipped when:
+     * - not in A/A,
+     * - command is read-only,
+     * - command arrives from replication link / fake client,
+     * - whitelist is empty. */
+    if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
+        dictSize(server.crdt_whitelist) > 0 && !isCrdtWhitelistedCommand(c->cmd)) {
+        rejectCommandFormat(c, 1, "command '%s' is not CRDT-whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
+        return C_OK;
+    }
+
     /* If cluster is enabled perform the cluster redirection here.
      * However we don't perform the redirection if:
      * 1) The sender of this command is our primary.
