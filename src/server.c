@@ -2388,7 +2388,7 @@ void initServerConfig(void) {
     server.active_replica = 0;
     server.multi_master = 0;
     server.multi_master_no_forward = 0;
-    server.crdt_whitelist = NULL;
+    server.crdt_whitelist = dictCreate(&modulesDictType);
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
@@ -2964,7 +2964,6 @@ void initServer(void) {
     server.monitors = listCreate();
     server.upstreams = listCreate();
     server.upstream_runtime = listCreate();
-    server.crdt_whitelist = dictCreate(&modulesDictType);
     server.rreplay_seen = dictCreate(&sdsHashDictType);
     server.rreplay_seen_order = listCreate();
     server.hlc_key_clock = dictCreate(&sdsKeyHeapPointerValueDictType);

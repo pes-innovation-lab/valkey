@@ -1443,6 +1443,27 @@ void rewriteConfigSaveOption(standardConfig *config, const char *name, struct re
     rewriteConfigMarkAsProcessed(state, name);
 }
 
+void rewriteConfigCrdtWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
+    UNUSED(config);
+
+    /* Emit a single 'crdt-whitelist cmd1 cmd2 ...' line listing every whitelisted command. 
+     * Accepts a space-separated list.
+     * When the whitelist is empty - nothing is written and also mark rewrite config as processed. */
+    if (dictSize(server.crdt_whitelist)) {
+        sds line = sdsnew(name);
+        dictIterator *di = dictGetIterator(server.crdt_whitelist);
+        dictEntry *de;
+        while ((de = dictNext(di)) != NULL) {
+            line = sdscatfmt(line, " %S", (sds)dictGetKey(de));
+        }
+        dictReleaseIterator(di);
+        rewriteConfigRewriteLine(state, name, line, 1); /* Last parameter is for forced write - 
+                                                         * overwrite and modify in memory, not persisted to disk*/
+    }
+
+    rewriteConfigMarkAsProcessed(state, name);
+}
+
 /* Rewrite the user option. */
 void rewriteConfigUserOption(struct rewriteConfigState *state) {
     /* If there is a user file defined we just mark this configuration
@@ -2960,6 +2981,65 @@ static sds getConfigSaveOption(standardConfig *config) {
     return buf;
 }
 
+/* Populate server.crdt_whitelist from a list of command names. 
+ *  Each name must resolve to a known command via lookupCommandBySds().
+ *
+ * At runtime 'CONFIG SET crdt-whitelist "..."' replaces the whole whitelist,
+ * while multiple 'crdt-whitelist <cmd>' directives in the config file keep
+ * getting added to the dict. */
+static int setConfigCrdtWhitelistOption(standardConfig *config, sds *argv, int argc, const char **err) {
+    UNUSED(config);
+    int j;
+
+    /* Treat a single empty argument as a request to clear the
+     * whitelist (e.g. CONFIG SET crdt-whitelist ""). */
+    if (argc == 1 && sdslen(argv[0]) == 0) argc = 0;
+
+    /* Validate every command name before mutating the whitelist so an invalid
+     * entry leaves the current whitelist untouched. */
+    for (j = 0; j < argc; j++) {
+        if (lookupCommandBySds(argv[j]) == NULL) {
+            *err = "No such command in crdt-whitelist";
+            return 0;
+        }
+    }
+
+    if (!reading_config_file) dictEmpty(server.crdt_whitelist, NULL);
+
+    /* Add the validated commands to the whitelist;
+     * If a command is already in the dict, dictAdd returns DICT_ERR
+     * so we free this duplicate string to prevent memory leaks. */
+    for (j = 0; j < argc; j++) {
+        struct serverCommand *cmd = lookupCommandBySds(argv[j]);
+        sds name = sdsdup(cmd->fullname);
+        if (dictAdd(server.crdt_whitelist, name, cmd) != DICT_OK) sdsfree(name);
+    }
+
+    return 1;
+}
+
+/* Convert the server.crdt_whitelist dict to a string,
+ * so it's human readable and is returned on a `CONFIG GET`  */
+static sds getConfigCrdtWhitelistOption(standardConfig *config) {
+    UNUSED(config);
+    sds buf = sdsempty();
+    dictIterator *di = dictGetIterator(server.crdt_whitelist);
+    dictEntry *de;
+    int first = 1;
+
+    while ((de = dictNext(di)) != NULL) {
+        if (!first) buf = sdscatlen(buf, " ", 1); /* If this is not the first command being processed in the loop, 
+                                                   * it appends a single space character " " to the string buffer. 
+                                                   * This prevents adding a leading space at the very beginning of the string, 
+                                                   * while ensuring all subsequent commands are separated by a space. */
+        buf = sdscatsds(buf, (sds)dictGetKey(de));
+        first = 0;
+    }
+    dictReleaseIterator(di);
+
+    return buf;
+}
+
 static int setConfigClientOutputBufferLimitOption(standardConfig *config, sds *argv, int argc, const char **err) {
     UNUSED(config);
     return updateClientOutputBufferLimit(argv, argc, err);
@@ -3555,6 +3635,7 @@ standardConfig static_configs[] = {
     /* Special configs */
     createSpecialConfig("dir", NULL, MODIFIABLE_CONFIG | PROTECTED_CONFIG | DENY_LOADING_CONFIG, setConfigDirOption, getConfigDirOption, rewriteConfigDirOption, NULL),
     createSpecialConfig("save", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigSaveOption, getConfigSaveOption, rewriteConfigSaveOption, NULL),
+    createSpecialConfig("crdt-whitelist", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigCrdtWhitelistOption, getConfigCrdtWhitelistOption, rewriteConfigCrdtWhitelistOption, NULL),
     createSpecialConfig("client-output-buffer-limit", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigClientOutputBufferLimitOption, getConfigClientOutputBufferLimitOption, rewriteConfigClientOutputBufferLimitOption, NULL),
     createSpecialConfig("oom-score-adj-values", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigOOMScoreAdjValuesOption, getConfigOOMScoreAdjValuesOption, rewriteConfigOOMScoreAdjValuesOption, updateOOMScoreAdj),
     createSpecialConfig("notify-keyspace-events", NULL, MODIFIABLE_CONFIG, setConfigNotifyKeyspaceEventsOption, getConfigNotifyKeyspaceEventsOption, rewriteConfigNotifyKeyspaceEventsOption, NULL),
