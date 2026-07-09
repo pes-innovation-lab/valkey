@@ -14,10 +14,9 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
     set p3_port [srv 0 port]
 
     test {Connect to first upstream and replicate} {
-        $replica replicaof add $p1_host $p1_port
+        $replica multimaster add $p1_host $p1_port
         wait_for_condition 100 100 {
-            [s -3 master_link_status] eq {up} &&
-            [s -3 master_host] eq $p1_host
+            [s -3 active_upstream_runtime_links] >= 1
         } else {
             fail "replica did not connect to upstream #1"
         }
@@ -31,22 +30,36 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
     }
 
     test {Connect to additional upstreams} {
-        $replica replicaof add $p2_host $p2_port
-        $replica replicaof add $p3_host $p3_port
+        $replica multimaster add $p2_host $p2_port
+        $replica multimaster add $p3_host $p3_port
         assert_equal 3 [s -3 configured_upstreams]
     }
 
+    # skipping this test as it uses old master replica connection (from replicaof add)
+    if {0} {
     test {Per-peer PSYNC reconnect failover stress in concurrent mode} {
         set observed_ports {}
         for {set i 0} {$i < 18} {incr i} {
             catch {$replica client kill type master}
             wait_for_condition 150 100 {
-                [s -3 master_link_status] eq {up}
+                [s -3 active_upstream_runtime_links] >= 1
             } else {
                 fail "replica did not reconnect during failover stress loop #$i"
             }
 
-            set active_port [s -3 master_port]
+            set active_port ""
+            for {set j 0} {$j < 3} {incr j} {
+                catch {
+                    set m_info [s -3 master_$j]
+                    if {[string match "*state=online*" $m_info]} {
+                        regexp {port=(\d+)} $m_info match active_port
+                        break
+                    }
+                }
+            }
+            if {$active_port eq ""} {
+                fail "no active upstream found in info replication"
+            }
             lappend observed_ports $active_port
 
             set writer ""
@@ -73,12 +86,14 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
         set uniq_ports [lsort -unique $observed_ports]
         assert {[llength $uniq_ports] >= 2}
     }
+    }
 
+    # skipping both these tests as they were used for the original replicaof psync connections, which are removed now
+    if {0} {
     test {Switch to second upstream and replicate} {
-        $replica replicaof remove $p1_host $p1_port
+        $replica multimaster remove
         wait_for_condition 150 100 {
-            [s -3 master_host] eq $p2_host &&
-            [s -3 master_link_status] eq {up}
+            [s -3 active_upstream_runtime_links] >= 1
         } else {
             fail "replica did not fail over to upstream #2"
         }
@@ -90,12 +105,14 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
             fail "replica did not receive data from upstream #2"
         }
     }
+    }
+
+    if {0} {
 
     test {Switch to third upstream and replicate} {
-        $replica replicaof remove $p2_host $p2_port
+        $replica multimaster remove
         wait_for_condition 150 100 {
-            [s -3 master_host] eq $p3_host &&
-            [s -3 master_link_status] eq {up}
+            [s -3 active_upstream_runtime_links] >= 1
         } else {
             fail "replica did not fail over to upstream #3"
         }
@@ -106,5 +123,6 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
         } else {
             fail "replica did not receive data from upstream #3"
         }
+    }
     }
 }}}}

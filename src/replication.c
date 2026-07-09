@@ -595,27 +595,10 @@ static void queueUpstreamForwardHandshake(client *c) {
     }
 
     {
-        // ATHARVA: we need to tell peer link that this node also needs to be added as an upstream
-        // const char *ip =  upstreamForwardAdvertisedHost();
-        // const char *address_argv[] = {"REPLCONF", "ip-address", ip};
-        // size_t ip_lens[] = {8,10,strlen(ip)};
-        // queueUpstreamForwardCommand(c,3,address_argv,ip_lens);
-
-        // sds portstr = getReplicaPortString();
-        // const char *port_argv[] = {"REPLCONF", "listening-port", portstr};
-        // size_t port_lens[] = {8, 14, sdslen(portstr)};
-        // queueUpstreamForwardCommand(c, 3, port_argv, port_lens);
-        // sdsfree(portstr);
 
         const char *capa_argv[] = {"REPLCONF", "capa", REPLICA_CAPA_RREPLAY_PEER_STR};
         size_t capa_lens[] = {8, 4, strlen(REPLICA_CAPA_RREPLAY_PEER_STR)};
         queueUpstreamForwardCommand(c, 3, capa_argv, capa_lens);
-    }
-    {
-        const char *uuid_argv[] = {"REPLCONF", "uuid", server.runid};
-        size_t uuid_lens[] = {8, 4, CONFIG_RUN_ID_SIZE};
-        queueUpstreamForwardCommand(c, 3, uuid_argv, uuid_lens);
-
     }
         char ip[NET_IP_STR_LEN];
         connAddrSockName(c->conn,ip,sizeof(ip),NULL);
@@ -623,6 +606,7 @@ static void queueUpstreamForwardHandshake(client *c) {
         const char *multimaster_peer_command[] = {"MULTIMASTER","ADD",ip,portstr};
         size_t command_lens[] = {11, 3, strlen(ip),sdslen(portstr)};
         queueUpstreamForwardCommand(c,4,multimaster_peer_command,command_lens);
+        sdsfree(portstr);
 }
 
 
@@ -774,7 +758,7 @@ static void connectConfiguredUpstreamForwardLink(connection *conn) {
         ll2string(portbuf,sizeof(portbuf),existing_runtime->port);
         const char *argv[] = {"MULTIMASTER","add", host, portbuf};
 
-        if(!strcasecmp(runtime->host,host)){
+        if(!strcasecmp(runtime->host,host) && existing_runtime->port == runtime->port){
             ln=next;
             continue;
         }
@@ -3435,13 +3419,6 @@ void replconfCommand(client *c) {
                 c->repl_data->replica_capa |= REPLICA_CAPA_SKIP_RDB_CHECKSUM;
             else if (!strcasecmp(objectGetVal(c->argv[j + 1]), REPLICA_CAPA_RREPLAY_PEER_STR)){
                 c->repl_data->replica_capa |= REPLICA_CAPA_RREPLAY_PEER;
-                // ATHARVA: adds the upstream for the current replica. this hopefully allows bidirectional comms
-                // port works fine but A sends local ip so instead we'll use the ip from the conn struct
-
-                // char addr[NET_IP_STR_LEN]; //first init
-                // connAddrPeerName(c->conn,addr,sizeof(addr),NULL); // pull ip of peer with established connection
-                // serverLog(LL_NOTICE, "Attempting bidirectional connect with %s port %d", addr, c->repl_data->replica_listening_port);
-                // addConfiguredUpstreamEndpoint(addr, c->repl_data->replica_listening_port); // adds the ip as a upstream
             }
         } else if (!strcasecmp(objectGetVal(c->argv[j]), "ack")) {
             /* REPLCONF ACK is used by replica to inform the primary the amount
