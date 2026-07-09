@@ -895,6 +895,7 @@ void replicationDetachUpstreamRuntimeClient(client *c) {
         runtime->replybuf = NULL;
     }
     runtime->link_client = NULL;
+    runtime->incoming_client = NULL;
     runtime->active_link = 0;
     runtime->repl_state = REPL_STATE_NONE;
     runtime->reploff = (long long)runtime->replay_last_acked_id;
@@ -6925,6 +6926,22 @@ void multimasterCommand(client *c){
             addReplyError(c, "Failed to add upstream endpoint");
             return;
         }
+        if(c->repl_data && (c->repl_data->replica_capa & REPLICA_CAPA_RREPLAY_PEER)){
+            syncUpstreamRuntimeWithConfigured();
+            listNode *ln;
+            ln = listFirst(server.upstream_runtime);
+            while(ln!=NULL){
+                listNode *next = listNextNode(ln);
+                valkeyUpstreamRuntime *runtime = listNodeValue(ln);
+                if (!strcasecmp(runtime->host,objectGetVal(c->argv[2])) && port==runtime->port){
+                    runtime->incoming_client = c;
+                    addReply(c,shared.ok);
+                    return;
+                }
+
+                ln=next;
+            }
+        }
         addReply(c, shared.ok);
         return;
 
@@ -6943,10 +6960,7 @@ void multimasterCommand(client *c){
                 listRewind(server.upstream_runtime, &li);
                 while ((ln = listNext(&li)) != NULL) {
                     valkeyUpstreamRuntime *runtime = listNodeValue(ln);
-                    char ip[NET_IP_STR_LEN];
-                    int port;
-                    connAddrPeerName(c->conn,ip,sizeof(ip),&port);
-                    if(runtime && !strcasecmp(runtime->host,ip)){
+                    if(runtime->incoming_client == c){
                         removeConfiguredUpstreamEndpoint(runtime->host,runtime->port);
                         addReply(c,shared.ok);
                         return;
