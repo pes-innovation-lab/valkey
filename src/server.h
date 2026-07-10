@@ -1646,6 +1646,7 @@ typedef struct valkeyUpstreamRuntime {
     sds host;
     int port;
     client *link_client;  /* Forwarding connection client for this upstream, when available. */
+    client *incoming_client; /* Receiving connection client for this upstream. */
     connection *forward_conn; /* Pending outbound forwarding connection, when connecting. */
     sds replybuf;         /* Small parser buffer for peer-forwarding command replies. */
     int active_link;       /* 1 when this upstream is currently active at runtime. */
@@ -4132,6 +4133,7 @@ void expiretimeCommand(client *c);
 void pexpiretimeCommand(client *c);
 void persistCommand(client *c);
 void replicaofCommand(client *c);
+void multimasterCommand(client *c);
 void roleCommand(client *c);
 void debugCommand(client *c);
 void msetCommand(client *c);

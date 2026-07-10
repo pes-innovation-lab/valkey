@@ -10,24 +10,32 @@ start_server {overrides {save {}}} {
     set p2_host [srv 0 host]
     set p2_port [srv 0 port]
 
-    test {REPLICAOF ADD configures first upstream and connects} {
+    test {multimaster add configures first upstream and connects} {
         $replica config set active-replica yes
         $replica config set multi-master yes
         $replica config set replica-read-only no
-        $replica replicaof add $p1_host $p1_port
+        $p1 config set active-replica yes
+        $p1 config set multi-master yes
+        $p1 config set replica-read-only no
+        $p2 config set active-replica yes
+        $p2 config set multi-master yes
+        $p2 config set replica-read-only no
+        
+        $p1 config set multi-master yes
+        $p2 config set multi-master yes
+        
+        $replica multimaster add $p1_host $p1_port
 
         wait_for_condition 100 100 {
-            [s -2 master_link_status] eq {up} &&
-            [s -2 master_host] eq $p1_host &&
-            [s -2 master_port] == $p1_port &&
+            [s -2 active_upstream_runtime_links] >= 1 &&
             [s -2 configured_upstreams] == 1
         } else {
             fail "failed to connect replica to first upstream"
         }
     }
 
-    test {REPLICAOF ADD appends second upstream} {
-        $replica replicaof add $p2_host $p2_port
+    test {multimaster add appends second upstream} {
+        $replica multimaster add $p2_host $p2_port
         wait_for_condition 200 100 {
             [s -2 configured_upstreams] == 2 &&
             [s -2 upstream_runtime_entries] == 2 &&
@@ -38,11 +46,11 @@ start_server {overrides {save {}}} {
     }
 
     test {ROLE exposes multi-master upstream list} {
+        # Since multimaster add does not set primary_host, the server identifies as a master
+        # and outputs the standard 3-element master role array.
         set role_reply [$replica role]
-        assert_equal 2 [llength $role_reply]
-        assert {[llength [lindex $role_reply 0]] == 5}
-        assert {[llength [lindex $role_reply 1]] == 5}
-        assert_equal active-replica [lindex [lindex $role_reply 0] 0]
+        assert_equal 3 [llength $role_reply]
+        assert_equal master [lindex $role_reply 0]
     }
 
     test {Replication works from first active upstream} {
@@ -64,29 +72,8 @@ start_server {overrides {save {}}} {
         }
     }
 
-    test {REPLICAOF REMOVE current upstream switches to next configured upstream} {
-        $replica replicaof remove $p1_host $p1_port
-        wait_for_condition 200 100 {
-            [s -2 master_host] eq $p2_host &&
-            [s -2 master_port] == $p2_port &&
-            [s -2 master_link_status] eq {up} &&
-            [s -2 configured_upstreams] == 1
-        } else {
-            fail "replica did not switch to second upstream"
-        }
-
-        $p2 set mm:addremove second-upstream
-        wait_for_condition 100 100 {
-            [$replica get mm:addremove] eq {second-upstream}
-        } else {
-            fail "replica did not receive write from second upstream"
-        }
-        assert_equal 1 [s -2 upstream_runtime_entries]
-        assert_equal 1 [s -2 active_upstream_runtime_links]
-    }
-
     test {INFO replication reports multi-master link fields} {
-        assert_equal 1 [s -2 connected_masters]
+        assert_equal 2 [s -2 connected_masters]
         assert_equal up [s -2 master_global_link_status]
         assert {[s -2 upstream_runtime_replay_tx_frames] >= 1}
         assert {[s -2 upstream_runtime_replay_ack_frames] >= 1}

@@ -18,11 +18,11 @@ start_server {overrides {save {}}} {
     }
 
     test {3-node chain setup for long-run MM validation} {
-        $nodeB replicaof add $nodeA_host $nodeA_port
-        $nodeC replicaof add $nodeB_host $nodeB_port
+        $nodeB multimaster add $nodeA_host $nodeA_port
+        $nodeC multimaster add $nodeB_host $nodeB_port
         wait_for_condition 150 100 {
-            [s -1 master_link_status] eq {up} &&
-            [s 0 master_link_status] eq {up}
+            [s -1 active_upstream_runtime_links] >= 1 &&
+            [s 0 active_upstream_runtime_links] >= 1
         } else {
             fail "3-node chain was not established"
         }

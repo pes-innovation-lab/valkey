@@ -1,11 +1,11 @@
 {
-    "REPLICAOF": {
-        "summary": "Configures a server as replica of another, or promotes it to a primary.",
+    "MULTIMASTER": {
+        "summary": "Configures a server as an active active replication target of another.",
         "complexity": "O(1)",
         "group": "server",
         "since": "5.0.0",
-        "arity": -3,
-        "function": "replicaofCommand",
+        "arity": -2,
+        "function": "multimasterCommand",
         "command_flags": ["NO_ASYNC_LOADING", "ADMIN", "NOSCRIPT", "STALE"],
         "arguments": [
             {
@@ -27,22 +27,37 @@
                         ]
                     },
                     {
-                        "name": "no-one",
+                        "name": "add-host-port",
                         "type": "block",
                         "arguments": [
                             {
-                                "name": "no",
+                                "name": "add",
                                 "type": "pure-token",
-                                "token": "NO"
+                                "token": "ADD"
                             },
                             {
-                                "name": "one",
-                                "type": "pure-token",
-                                "token": "ONE"
+                                "name": "host",
+                                "type": "string"
+                            },
+                            {
+                                "name": "port",
+                                "type": "integer"
                             }
                         ]
                     }
                 ]
+
+                
+            },
+            {
+
+                    
+                "name": "remove",
+                "type": "pure-token",
+                "token": "REMOVE"
+                    
+                    
+                
             }
         ],
         "reply_schema": {

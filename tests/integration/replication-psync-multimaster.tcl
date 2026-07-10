@@ -11,9 +11,9 @@ start_server {tags {"repl external:skip"} overrides {save {} active-replica yes 
         $b config set repl-backlog-size 100mb
 
         test {Active-active link bootstrap for psync test} {
-            $b replicaof add $ah $ap
+            $b multimaster add $ah $ap
             wait_for_condition 100 100 {
-                [s 0 master_link_status] eq {up}
+                [s 0 active_upstream_runtime_links] >= 1
             } else {
                 fail "replica link was not established"
             }
