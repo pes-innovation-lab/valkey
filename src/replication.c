@@ -564,17 +564,6 @@ static void queueUpstreamForwardCommand(client *c, int argc, const char **argv, 
 
 
 
-// static const char *upstreamForwardAdvertisedHost(void) {
-//     if (server.replica_announce_ip && server.replica_announce_ip[0] != '\0') return server.replica_announce_ip;
-//     if (server.bindaddr_count > 0 && server.bindaddr[0] && server.bindaddr[0][0] != '\0') return server.bindaddr[0];
-//     return "127.0.0.1";
-// }
-
-// static int upstreamForwardAdvertisedPort(void) {
-//     if (server.replica_announce_port > 0) return server.replica_announce_port;
-//     if (server.tls_replication && server.tls_port > 0) return server.tls_port;
-//     return server.port;
-// }
 
 static void queueUpstreamForwardHandshake(client *c) {
     if (c == NULL) return;
@@ -594,42 +583,22 @@ static void queueUpstreamForwardHandshake(client *c) {
         queueUpstreamForwardCommand(c, auth_argc, auth_argv, auth_lens);
     }
 
-    {
+    
 
-        const char *capa_argv[] = {"REPLCONF", "capa", REPLICA_CAPA_RREPLAY_PEER_STR};
-        size_t capa_lens[] = {8, 4, strlen(REPLICA_CAPA_RREPLAY_PEER_STR)};
-        queueUpstreamForwardCommand(c, 3, capa_argv, capa_lens);
-    }
-        char ip[NET_IP_STR_LEN];
-        connAddrSockName(c->conn,ip,sizeof(ip),NULL);
-        sds portstr = getReplicaPortString();
-        const char *multimaster_peer_command[] = {"MULTIMASTER","ADD",ip,portstr};
-        size_t command_lens[] = {11, 3, strlen(ip),sdslen(portstr)};
-        queueUpstreamForwardCommand(c,4,multimaster_peer_command,command_lens);
-        sdsfree(portstr);
+    const char *capa_argv[] = {"REPLCONF", "capa", REPLICA_CAPA_RREPLAY_PEER_STR};
+    size_t capa_lens[] = {8, 4, strlen(REPLICA_CAPA_RREPLAY_PEER_STR)};
+    queueUpstreamForwardCommand(c, 3, capa_argv, capa_lens);
+
+    char ip[NET_IP_STR_LEN];
+    connAddrSockName(c->conn,ip,sizeof(ip),NULL);
+    sds portstr = getReplicaPortString();
+    const char *multimaster_peer_command[] = {"MULTIMASTER","ADD",ip,portstr};
+    size_t command_lens[] = {11, 3, strlen(ip),sdslen(portstr)};
+    queueUpstreamForwardCommand(c,4,multimaster_peer_command,command_lens);
+    sdsfree(portstr);
 }
 
 
-// static void upstreamRuntimeRequestPeerFullResync(valkeyUpstreamRuntime *runtime) {
-//     if (runtime == NULL || runtime->link_client == NULL) return;
-//     if (!runtime->replay_fullsync_required) return;
-
-//     const char *host = upstreamForwardAdvertisedHost();
-//     int port = upstreamForwardAdvertisedPort();
-//     char portbuf[32];
-//     ll2string(portbuf, sizeof(portbuf), port);
-
-//     const char *argv[] = {"REPLICAOF", host, portbuf};
-//     size_t argv_lens[] = {9, strlen(host), strlen(portbuf)};
-//     queueUpstreamForwardCommand(runtime->link_client, 3, argv, argv_lens);
-
-//     runtime->replay_fullsync_requests++;
-//     runtime->replay_fullsync_required = 0;
-//     if (runtime->replay_pending_frames) listEmpty(runtime->replay_pending_frames);
-//     serverLog(LL_WARNING,
-//               "Requested peer full sync for upstream %s:%d after replay queue overflow (target primary %s:%d)",
-//               runtime->host ? runtime->host : "?", runtime->port, host, port);
-// }
 
 static int processUpstreamForwardReplyBuffer(valkeyUpstreamRuntime *runtime) {
     if (runtime == NULL || runtime->replybuf == NULL) return C_OK;
@@ -741,13 +710,6 @@ static void connectConfiguredUpstreamForwardLink(connection *conn) {
     connSetReadHandler(conn, discardUpstreamForwardReplies);
     queueUpstreamForwardHandshake(link_client);
 
-    // ATHARVA removed all fullsync stuff from multimaster. this assumes happy path where the replay buffer never overflows
-    // not ideal, but works for now
-    // if (runtime->replay_fullsync_required) {
-    //     upstreamRuntimeRequestPeerFullResync(runtime);
-    // } else {
-    //     upstreamRuntimeFlushPendingReplayQueue(runtime);
-    // }
     listNode *ln;
     ln = listFirst(server.upstream_runtime);
     while (ln != NULL) {
@@ -879,30 +841,14 @@ void replicationDetachUpstreamRuntimeClient(client *c) {
         runtime->replybuf = NULL;
     }
     runtime->link_client = NULL;
-    /* Do NOT clear incoming_client here. It belongs to the incoming
-     * connection from the peer, which is independent of the outgoing
-     * link_client being detached. */
+
+    if (runtime->incoming_client == c) {
+            runtime->incoming_client = NULL;
+}
     runtime->active_link = 0;
     runtime->repl_state = REPL_STATE_NONE;
     runtime->reploff = (long long)runtime->replay_last_acked_id;
     runtime->last_io_sec = -1;
-}
-
-/* Clear incoming_client when the actual incoming connection from a peer
- * is being freed. This is separate from replicationDetachUpstreamRuntimeClient
- * which handles the outgoing link_client. */
-void replicationDetachUpstreamIncomingClient(client *c) {
-    if (server.upstream_runtime == NULL) return;
-    listIter li;
-    listNode *ln;
-    listRewind(server.upstream_runtime, &li);
-    while ((ln = listNext(&li)) != NULL) {
-        valkeyUpstreamRuntime *runtime = listNodeValue(ln);
-        if (runtime->incoming_client == c) {
-            runtime->incoming_client = NULL;
-            return;
-        }
-    }
 }
 
 static int addConfiguredUpstreamEndpoint(const char *host, int port) {
@@ -6923,7 +6869,7 @@ void multimasterCommand(client *c){
             return;
         }
         if(c->repl_data && (c->repl_data->replica_capa & REPLICA_CAPA_RREPLAY_PEER)){
-            syncUpstreamRuntimeWithConfigured();
+            //syncUpstreamRuntimeWithConfigured();
 
             /* Only set incoming_client for the self-ADD (the first ADD a peer
              * sends about itself), not for third-party ADDs (a peer telling us
@@ -6985,6 +6931,8 @@ void multimasterCommand(client *c){
                         return;
                     }
                 }
+                addReplyErrorObject(c,shared.syntaxerr);
+                return;
             }
             
             else {
