@@ -6832,7 +6832,7 @@ void replicationHandlePrimaryDisconnection(void) {
         connectWithPrimary();
     }
 }
-/* multimaster command for active active replication*/
+/* multimaster command for active active replication */
 void multimasterCommand(client *c) {
     if (server.cluster_enabled) {
         addReplyError(c, "MULTIMASTER not allowed in cluster mode.");
