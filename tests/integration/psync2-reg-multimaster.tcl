@@ -6,7 +6,7 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
         set RH($j) [srv [expr 0-$j] host]
         set RP($j) [srv [expr 0-$j] port]
     }
-    if {0}{
+    if {0} {
     test {PSYNC2 multi-master setup} {
         $R(1) multimaster add $RH(0) $RP(0)
         $R(2) multimaster add $RH(0) $RP(0)
