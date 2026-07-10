@@ -11,8 +11,12 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
     test "Multimaster Add creates two-way replication" {
         $R(1) multimaster add $RH(0) $RP(0)
         
-        # Wait a moment for the handshake and connections to settle
-        after 1000 
+        wait_for_condition 150 100 {
+            [s -1 active_upstream_runtime_links] >= 1 &&
+            [s 0 active_upstream_runtime_links] >= 1
+        } else {
+            fail "connection not established"
+        }
     }
 
     test "Replication works from Node 0 to Node 1" {
@@ -39,8 +43,12 @@ start_server {overrides {save {} active-replica yes multi-master yes replica-rea
         # Running it with just 'remove' triggers the 2-argument cascade delete
         $R(1) multimaster remove
 
-        # Wait a moment for the cascade delete to propagate and sockets to close
-        after 1000
+        wait_for_condition 150 100 {
+            [s -1 active_upstream_runtime_links] == 0 &&
+            [s 0 active_upstream_runtime_links] == 0
+        } else {
+            fail "disconnection failed"
+        }
 
         # Now test that replication is dead
         $R(0) set post_remove_0 "isolated_0"
