@@ -6877,6 +6877,7 @@ void multimasterCommand(client *c){
              * handshake, so if any runtime already has incoming_client == c
              * we know the self-ADD was already processed. */
             int already_claimed = 0;
+            valkeyUpstreamRuntime *foundmatch = NULL;
             {
                 listIter check_li;
                 listNode *check_ln;
@@ -6885,26 +6886,23 @@ void multimasterCommand(client *c){
                     valkeyUpstreamRuntime *r = listNodeValue(check_ln);
                     if (r->incoming_client == c) {
                         already_claimed = 1;
-                        break;
+                        
+                    }
+
+                    if (!strcasecmp(r->host,objectGetVal(c->argv[2])) && port==r->port){
+                        foundmatch = r;
                     }
                 }
-            }
 
-            listNode *ln;
-            ln = listFirst(server.upstream_runtime);
-            while(ln!=NULL){
-                listNode *next = listNextNode(ln);
-                valkeyUpstreamRuntime *runtime = listNodeValue(ln);
-                if (!strcasecmp(runtime->host,objectGetVal(c->argv[2])) && port==runtime->port){
-                    if (!already_claimed) {
-                        runtime->incoming_client = c;
+                if (foundmatch){
+                    if(!already_claimed){
+                        foundmatch->incoming_client = c;
                     }
                     addReply(c,shared.ok);
                     return;
                 }
-
-                ln=next;
             }
+
         }
         addReply(c, shared.ok);
         return;
