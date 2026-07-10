@@ -6919,6 +6919,8 @@ void multimasterCommand(client *c) {
                 /* sends an error message to the sending peer if the runtime that needs to be removed is not found
                  * in the runtime list */
                 addReplyErrorObject(c, shared.err);
+                serverLog(LL_WARNING, "MULTIMASTER REMOVE from addr=%s (client_id=%llu) did not match any upstream runtime",
+                          getClientPeerId(c), (unsigned long long)c->id);
                 return;
             }
 
