@@ -761,6 +761,14 @@ dictType objToHashtableDictType = {
     .entryDestructor = dictEntryDestructorObjectKeyHashtableValue,
 };
 
+dictType hashCrdtDictType = {
+    .entryGetKey = dictEntryGetKey,
+    .hashFunction = dictSdsCaseHash,
+    .keyCompare = dictSdsKeyCaseCompare,
+    
+
+};
+
 /* Callback used for hash tables where the entries are dicts and the key
  * (channel name) is stored in each dict's metadata. */
 const void *hashtableChannelsGetKey(const void *entry) {
@@ -3159,6 +3167,9 @@ void initServer(void) {
     applyWatchdogPeriod();
 
     if (server.maxmemory_clients != 0) initServerClientMemUsageBuckets();
+
+    server.hash_crdt_metadata = dictCreate(&hashCrdtDictType);
+    server.peer_registry = dictCreate(&hashCrdtDictType);
 }
 
 void initListeners(void) {
@@ -3996,6 +4007,9 @@ void call(client *c, int flags) {
         }
     }
     
+    /* checks if its a hset command, if it is then it updates the hlc clock */
+    if (c->cmd->proc == hsetCommand)
+    hlcNextLocalClock();
     c->cmd->proc(c);
 
     if (c->flag.argv_borrowed && server.enable_debug_assert) {

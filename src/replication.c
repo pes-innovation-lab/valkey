@@ -584,6 +584,12 @@ static void queueUpstreamForwardHandshake(client *c) {
     size_t capa_lens[] = {8, 4, strlen(REPLICA_CAPA_RREPLAY_PEER_STR)};
     queueUpstreamForwardCommand(c, 3, capa_argv, capa_lens);
 
+
+    /* required for hash crdt */
+    const char *uuid_argv[] = {"REPLCONF", "uuid", server.runid};
+    size_t uuid_lens[] = {8, 4, CONFIG_RUN_ID_SIZE};
+    queueUpstreamForwardCommand(c, 3, uuid_argv, uuid_lens);
+
     char ip[NET_IP_STR_LEN];
     connAddrSockName(c->conn, ip, sizeof(ip), NULL);
     sds portstr = getReplicaPortString();
@@ -859,6 +865,8 @@ static int addConfiguredUpstreamEndpoint(const char *host, int port) {
     listAddNodeTail(server.upstreams, upstream);
     syncUpstreamRuntimeWithConfigured();
     persistConfiguredUpstreamsState();
+    /* new upstream increments this counter */
+    server.num_peers+=1;
     return C_OK;
 }
 
@@ -1325,7 +1333,7 @@ void replicationApplyRdbRReplaySeen(const rdbSaveInfo *rsi) {
     }
 }
 
-static hlc hlcNextLocalClock(void) {
+hlc hlcNextLocalClock(void) {
     uint64_t pt = ustime();
     /* self-stabilization: if the HLC wall time has drifted too far
      * ahead of physical time, reset it back to pt and zero the logical counter
@@ -2485,7 +2493,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     }
 
     unsigned long long replay_id = ++server.rreplay_seq;
-    hlc hlc_ts = hlcNextLocalClock();
+    hlc hlc_ts = server.hlc_clock;
     char replay_tie_break[CONFIG_RUN_ID_SIZE + 32];
     snprintf(replay_tie_break, sizeof(replay_tie_break), "%s:%llu", server.runid, replay_id);
     hlcStampCommandKeys(payload_cmd, payload_argv, payload_argc, dictid, hlc_ts, replay_tie_break);
@@ -3732,30 +3740,38 @@ void rreplayCommand(client *c) {
 
     robj **exec_payload_argv = NULL;
     int exec_payload_argc = 0;
-    if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
-        exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
-                                                     &exec_payload_argc);
-        if (exec_payload_argv == NULL || exec_payload_argc <= 1) {
+
+    if (payload_cmd->proc != hsetCommand){
+        if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
+            exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
+                                                        &exec_payload_argc);
+            if (exec_payload_argv == NULL || exec_payload_argc <= 1) {
+                if (from_primary_link) {
+                    c->flag.skip_repl_stream_propagation = 1;
+                }
+                if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
+                return;
+            }
+        } else if (!hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
             if (from_primary_link) {
                 c->flag.skip_repl_stream_propagation = 1;
             }
             if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
             return;
+        } else {
+            exec_payload_argv = cloneArgvWithRef(payload_argv, payload_argc);
+            exec_payload_argc = payload_argc;
+            if (exec_payload_argv == NULL) {
+                serverLog(LL_WARNING, "Invalid RREPLAY from primary: could not allocate payload argv clone");
+                freeClientAsync(c);
+                return;
+            }
         }
-    } else if (!hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
-        if (from_primary_link) {
-            c->flag.skip_repl_stream_propagation = 1;
-        }
-        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
-        return;
-    } else {
+    }
+    else{
+        /* since we're skipping the above if statement, we still need these lines to run so that the fake client gets the payload*/
         exec_payload_argv = cloneArgvWithRef(payload_argv, payload_argc);
         exec_payload_argc = payload_argc;
-        if (exec_payload_argv == NULL) {
-            serverLog(LL_WARNING, "Invalid RREPLAY from primary: could not allocate payload argv clone");
-            freeClientAsync(c);
-            return;
-        }
     }
 
     int outer_argc = c->argc;
@@ -6972,6 +6988,7 @@ void multimasterCommand(client *c) {
                     valkeyUpstreamRuntime *runtime = listNodeValue(ln);
                     if (runtime->incoming_client == c) {
                         removeConfiguredUpstreamEndpoint(runtime->host, runtime->port);
+                        server.num_peers-=1;
                         addReply(c, shared.ok);
                         return;
                     }
@@ -7002,6 +7019,7 @@ void multimasterCommand(client *c) {
                     ln = next;
                 }
                 addReply(c, shared.ok);
+                server.num_peers=0;
                 return;
             }
         }

@@ -507,6 +507,7 @@ ENGINE_SERVER_OBJ = \
     geo.o \
     geohash.o \
     geohash_helper.o \
+	hash_crdt.o \
     hashtable.o \
     hyperloglog.o \
     intset.o \

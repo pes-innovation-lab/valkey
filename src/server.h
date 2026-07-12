@@ -1636,6 +1636,9 @@ static inline int hlcCompare(const hlc *a, const hlc *b) {
     if (a->logical < b->logical) return -1;
     return 0;
 }
+/* defined in replication.c this forward declaration is needed so that it can be used in the call() function before a write command 
+ * to obtain the latest hlc timestamp */
+hlc hlcNextLocalClock(void);
 
 /* A configured upstream endpoint. For now this is a scaffold that mirrors
  * the legacy single primary configuration. */
@@ -2235,6 +2238,7 @@ struct valkeyServer {
     int multi_master;     /* If enabled, allow multiple configured upstreams (scaffold). */
     int multi_master_no_forward; /* If enabled, avoid forwarding replay traffic (scaffold). */
     hashtable *multi_master_whitelist; /* Dictionary containing commands allowed in multi-master mode. */
+    int num_peers; /* stores the number of multimaster peers connected to this server */
     dict *rreplay_seen;   /* Recent replay frames for dedupe. Key: "<origin-uuid>:<replay-id>" */
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
@@ -2482,6 +2486,19 @@ struct valkeyServer {
     /* Local environment */
     char *locale_collate;
     char *debug_context; /* A free-form string that has no impact on server except being included in a crash report. */
+    /* CRDT metadata */
+    dict *hash_crdt_metadata;
+    hlc *current_rreplay_hlc;
+    dict *peer_registry;
+    int next_peer_id;
+};
+
+typedef struct multimasterCommandHandler multimasterCommandHandler;
+
+struct multimasterCommandHandler{
+    int (*parse)(multimasterCommandHandler *self, sds raw);
+    robj *(*serialize)(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc);
+    void (*resolve)(multimasterCommandHandler *self, client *c);
 };
 
 typedef struct multimasterCommandHandler multimasterCommandHandler;
