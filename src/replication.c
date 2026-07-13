@@ -1787,11 +1787,11 @@ static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, crdtMet
 /* Produce the CRDT metadata field for an outbound RREPLAY frame. 
  * Currently a stub that always emits the "none" sentinel; 
  * per-command CRDT implementations will generate specific metadata here. (cc @Atharva, @Anirudh, @Mahilan) */
-static sds rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
+static robj *rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
     UNUSED(cmd);
     UNUSED(argv);
     UNUSED(argc);
-    return sdsnew(RREPLAY_CRDT_META_NONE);
+    return createStringObject(RREPLAY_CRDT_META_NONE,strlen(RREPLAY_CRDT_META_NONE));
 }
 
 /* Return the pointer to a string representing the replica ip:listening_port
@@ -2516,9 +2516,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
     /* CRDT metadata field (index 5). Currently the "none" sentinel; 
      * future per-CRDT strategies will populate it via rreplayCrdtMetadataSerialize. */
-    sds crdt_meta = rreplayCrdtMetadataSerialize(payload_cmd, payload_argv, payload_argc);
-    frame_argv[RREPLAY_CRDT_META_IDX] = createStringObject(crdt_meta, sdslen(crdt_meta));
-    sdsfree(crdt_meta);
+    frame_argv[RREPLAY_CRDT_META_IDX] = rreplayCrdtMetadataSerialize(payload_cmd, payload_argv, payload_argc);
     for (int j = 0; j < payload_argc; j++) {
         frame_argv[j + RREPLAY_PAYLOAD_START_IDX] = payload_argv[j];
         incrRefCount(frame_argv[j + RREPLAY_PAYLOAD_START_IDX]);
