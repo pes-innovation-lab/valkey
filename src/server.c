@@ -3610,8 +3610,6 @@ bool clientSupportStandAloneRedirect(client *c) {
     return !server.cluster_enabled && server.primary_host && c->capa & CLIENT_CAPA_REDIRECT;
 }
 
-/* Check if a command is permitted by the CRDT whitelist for multi-master mode.
- * Returns 1 if the command is explicitly listed. Returns 0 otherwise. */
 int isCrdtWhitelistedCommand(struct serverCommand *cmd) {
     if (cmd == NULL) return 0;
     return dictFind(server.crdt_whitelist, cmd->fullname) != NULL;
@@ -4494,8 +4492,8 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* CRDT whitelist check for multi-master mode.
-     * A write command sent by an external client must have an explicit CRDT strategy,
+    /* whitelist check for multi-master mode.
+     * A write command sent by an external client must have an explicit conflict resolution strategy,
      * and if that is the case, the command must be whitelisted in the config,
      * otherwise it is rejected here. 
      * So it is neither applied locally nor forwarded via RREPLAY, 
@@ -4508,7 +4506,8 @@ int processCommand(client *c) {
      * - whitelist is empty. */
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
         dictSize(server.crdt_whitelist) > 0 && !isCrdtWhitelistedCommand(c->cmd)) {
-        rejectCommandFormat(c, 1, "command '%s' is not CRDT-whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
+        rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
+        serverLog(LL_WARNING,"command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;
     }
 

@@ -1763,7 +1763,7 @@ typedef struct {
     sds raw;          /* Raw metadata blob. Points into argv. */
 } crdtMetadata;
 
-/* Parse and validate the CRDT metadata field of an inbound RREPLAY frame.
+/* Parse and validate the metadata field of an inbound RREPLAY frame.
  * 
  * 'meta' is the raw bulk-string value at index RREPLAY_CRDT_META_IDX.
  * Returns `C_OK` and fills '*out' on success, or `C_ERR` on error.
@@ -2452,7 +2452,7 @@ static void forwardRawRReplayFrameToUpstreams(robj **argv, int argc, client *exc
 /* Encapsulate a locally generated command and send it upstream to the
  * connected primary as an active-active replay frame.
  *
- * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <crdt-metadata> <command> [arg ...] */
+ * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...] */
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     if (dictid < 0 || argv == NULL || argc <= 0) return;
 
@@ -3539,7 +3539,7 @@ void replconfCommand(client *c) {
     addReply(c, shared.ok);
 }
 
-/* RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <crdt-metadata> <command> [arg ...]
+/* RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...]
  *   idx:      1            2        3          4           5             6       7+
  * Internal active-active replay wrapper.
  *
