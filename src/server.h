@@ -2491,6 +2491,7 @@ struct valkeyServer {
     hlc *current_rreplay_hlc;
     dict *peer_registry;
     int next_peer_id;
+    sds incoming_uuid;
 };
 
 typedef struct multimasterCommandHandler multimasterCommandHandler;

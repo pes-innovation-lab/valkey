@@ -12,11 +12,15 @@ typedef struct{
 
 typedef struct{
     hlc reset_hlc;
-    char *base_val;
+    sds base_val;
     list *list_of_peers;
 } hash_key_field;
 
 void initializeHashKeyField(hash_key_field *crdt,hlc *timestamp, char* base_val);
+sds evaluateHashKey(hash_key_field *crdt);
+peer_value* findPeerByPeerId(hash_key_field *crdt,uint16_t peerid);
+peer_value* createNewPeer(uint16_t peerid);
+uint16_t getPeerId(sds origin_uuid);
 
 
 #endif

@@ -4008,7 +4008,7 @@ void call(client *c, int flags) {
     }
     
     /* checks if its a hset command, if it is then it updates the hlc clock */
-    if (c->cmd->proc == hsetCommand)
+    if (c->cmd->proc == hsetCommand || c->cmd->proc == hincrbyCommand)
     hlcNextLocalClock();
     c->cmd->proc(c);
 

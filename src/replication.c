@@ -3808,10 +3808,12 @@ void rreplayCommand(client *c) {
     exec_client->lastcmd = payload_cmd;
     exec_client->realcmd = payload_cmd;
     exec_client->slot = -1;
+
     
     multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(payload_cmd);
     if (handler && handler->resolve) handler->resolve(handler,exec_client);
     else call(exec_client, CMD_CALL_PROPAGATE_AOF);
+
     hlcStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, hlc_ts, replay_tie_break);
     if (exec_client->flag.blocked) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: payload command '%s' blocked", payload_cmd->fullname);
