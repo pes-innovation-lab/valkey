@@ -364,6 +364,20 @@ void exitFromChild(int retcode) {
  * keys and Objects as values (Objects can hold SDS strings,
  * lists, sets). */
 
+const void *whitelistGetEntry(const void *entry){
+    const whitelistEntry *we = entry;
+    return (void *)we->name;
+}
+
+void whitelistEntryDestructor(void *entry){
+    whitelistEntry *we = entry;
+    if (we==NULL) return;
+
+    sdsfree(we->name);
+
+    zfree(we);
+}
+
 void dictVanillaFree(void *val) {
     zfree(val);
 }
@@ -793,9 +807,10 @@ hashtableType kvstoreChannelHashtableType = {
 /* Modules system dictionary type. Keys are module name,
  * values are pointer to ValkeyModule struct. */
 hashtableType multimasterWhitelistType = {
-    .entryGetKey = hashtableCommandGetCurrentName,
+    .entryGetKey = whitelistGetEntry,
     .hashFunction = dictSdsCaseHash,
     .keyCompare = dictSdsKeyCaseCompare,
+    .entryDestructor = whitelistEntryDestructor,
 };
 
 dictType modulesDictType = {
@@ -3618,7 +3633,25 @@ bool clientSupportStandAloneRedirect(client *c) {
 
 int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
     if (cmd == NULL) return 0;
-    return dictFind(server.crdt_whitelist, cmd->fullname) != NULL;
+    void *entry = NULL;
+    return hashtableFind(server.crdt_whitelist, cmd->fullname,&entry);
+}
+
+void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler){
+    void *entry = NULL;
+    if(hashtableFind(server.crdt_whitelist,cmd_name,&entry)){
+        whitelistEntry *we = entry;
+        we->handler = handler;
+    }
+}
+
+CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd){
+    void *entry = NULL;
+    if(hashtableFind(server.crdt_whitelist,cmd->fullname,&entry)){
+        whitelistEntry *we = entry;
+        return we->handler;
+    }
+    return NULL;
 }
 
 static int shouldForwardToPrimaryViaRReplay(int target) {

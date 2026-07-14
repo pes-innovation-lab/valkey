@@ -2484,6 +2484,25 @@ struct valkeyServer {
     char *debug_context; /* A free-form string that has no impact on server except being included in a crash report. */
 };
 
+
+/* CRDT Command handler */
+typedef int (*crdtMetadataParseFn)(sds raw, void **parsed);
+typedef void (*crdtMetadataFreeFn)(void *parsed);
+typedef robj *(*crdtMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);
+typedef int (*crdtConflictResolveFn)(void *local_meta, void *remote_meta, void **result);
+
+typedef struct {
+    crdtMetadataParseFn parse;
+    crdtMetadataFreeFn free;
+    crdtMetadataSerializeFn serialize;
+    crdtConflictResolveFn resolve;
+} CrdtCommandHandler;
+
+typedef struct{
+    sds name;
+    CrdtCommandHandler *handler;
+} whitelistEntry;
+
 #define MAX_KEYS_BUFFER 256
 
 typedef struct {
@@ -3353,6 +3372,8 @@ sds replicationSendAuth(connection *conn);
 sds receiveSynchronousResponse(connection *conn);
 ConnectionType *connTypeOfReplication(void);
 robj *generateSelectCommand(int dictid);
+void registerCrdtCommandHandler(const char *cmd_name, CrdtCommandHandler *handler);
+CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd);
 
 /* Generic persistence functions */
 void startLoadingFile(size_t size, char *filename, int rdbflags);

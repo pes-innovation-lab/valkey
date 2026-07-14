@@ -1761,6 +1761,8 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
 typedef struct {
     int has_metadata; /* 0 for "none", 1 present. */
     sds raw;          /* Raw metadata blob. Points into argv. */
+    CrdtCommandHandler *handler;
+    void *parsed;
 } multimasterMetadata;
 
 /* Parse and validate the metadata field of an inbound RREPLAY frame.
@@ -1771,26 +1773,33 @@ typedef struct {
  * we can add them here.
  * per-CRDT branches will be added here as strategies are implemented. */
 static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multimasterMetadata *out) {
-    UNUSED(cmd);
 
     out->raw = meta;
     out->has_metadata = 0;
 
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
-
+    CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
+    if (!handler) return C_ERR;
+    void *parsed = NULL;
+    if (handler->parse(meta, &parsed) != C_OK){
+        serverLog(LL_WARNING, "Unsupported CRDT metadata format: %s", meta ? meta : "(null)");
+        return C_ERR;
+    }
+    out->has_metadata = 1;
+    out->parsed = parsed;
+    out->handler = handler;
+    return C_OK;
     /* CRDT parsing for the different types go here.
      * cc @Atharva, @Mahilan, Anirudh */
-    serverLog(LL_WARNING, "Unsupported CRDT metadata format: %s", meta ? meta : "(null)");
-    return C_ERR;
+    
 }
 
 /* Produce the CRDT metadata field for an outbound RREPLAY frame. 
  * Currently a stub that always emits the "none" sentinel; 
  * per-command CRDT implementations will generate specific metadata here. (cc @Atharva, @Anirudh, @Mahilan) */
 static robj *rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
-    UNUSED(cmd);
-    UNUSED(argv);
-    UNUSED(argc);
+    CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
+    if (handler) return handler->serialize(cmd,argv,argc);
     return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
 }
 
