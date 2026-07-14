@@ -3610,7 +3610,7 @@ bool clientSupportStandAloneRedirect(client *c) {
     return !server.cluster_enabled && server.primary_host && c->capa & CLIENT_CAPA_REDIRECT;
 }
 
-int isCrdtWhitelistedCommand(struct serverCommand *cmd) {
+int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
     if (cmd == NULL) return 0;
     return dictFind(server.crdt_whitelist, cmd->fullname) != NULL;
 }
@@ -4505,7 +4505,7 @@ int processCommand(client *c) {
      * - command arrives from replication link / fake client,
      * - whitelist is empty. */
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
-        dictSize(server.crdt_whitelist) > 0 && !isCrdtWhitelistedCommand(c->cmd)) {
+        dictSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
         rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         serverLog(LL_WARNING,"command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;

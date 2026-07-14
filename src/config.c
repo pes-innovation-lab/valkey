@@ -1443,12 +1443,12 @@ void rewriteConfigSaveOption(standardConfig *config, const char *name, struct re
     rewriteConfigMarkAsProcessed(state, name);
 }
 
-void rewriteConfigCrdtWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
+/* Emit a single 'multi-master-whitelist cmd1 cmd2 ...' line listing every whitelisted command. 
+* Accepts a space-separated list.
+* When the whitelist is empty - nothing is written and also mark rewrite config as processed. */
+void rewriteConfigMultimasterWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
     UNUSED(config);
 
-    /* Emit a single 'crdt-whitelist cmd1 cmd2 ...' line listing every whitelisted command. 
-     * Accepts a space-separated list.
-     * When the whitelist is empty - nothing is written and also mark rewrite config as processed. */
     if (dictSize(server.crdt_whitelist)) {
         sds line = sdsnew(name);
         dictIterator *di = dictGetIterator(server.crdt_whitelist);
@@ -2981,13 +2981,13 @@ static sds getConfigSaveOption(standardConfig *config) {
     return buf;
 }
 
-/* Populate server.crdt_whitelist from a list of command names. 
+/* Populate server.multi_master_whitelist from a list of command names. 
  *  Each name must resolve to a known command via lookupCommandBySds().
  *
- * At runtime 'CONFIG SET crdt-whitelist "..."' replaces the whole whitelist,
- * while multiple 'crdt-whitelist <cmd>' directives in the config file keep
+ * At runtime 'CONFIG SET multi-master-whitelist "..."' replaces the whole whitelist,
+ * while multiple 'multi-master-whitelist <cmd>' directives in the config file keep
  * getting added to the dict. */
-static int setConfigCrdtWhitelistOption(standardConfig *config, sds *argv, int argc, const char **err) {
+static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv, int argc, const char **err) {
     UNUSED(config);
     int j;
 
@@ -3020,7 +3020,7 @@ static int setConfigCrdtWhitelistOption(standardConfig *config, sds *argv, int a
 
 /* Convert the server.crdt_whitelist dict to a string,
  * so it's human readable and is returned on a `CONFIG GET`  */
-static sds getConfigCrdtWhitelistOption(standardConfig *config) {
+static sds getConfigMultimasterWhitelistOption(standardConfig *config) {
     UNUSED(config);
     sds buf = sdsempty();
     dictIterator *di = dictGetIterator(server.crdt_whitelist);
@@ -3635,7 +3635,7 @@ standardConfig static_configs[] = {
     /* Special configs */
     createSpecialConfig("dir", NULL, MODIFIABLE_CONFIG | PROTECTED_CONFIG | DENY_LOADING_CONFIG, setConfigDirOption, getConfigDirOption, rewriteConfigDirOption, NULL),
     createSpecialConfig("save", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigSaveOption, getConfigSaveOption, rewriteConfigSaveOption, NULL),
-    createSpecialConfig("crdt-whitelist", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigCrdtWhitelistOption, getConfigCrdtWhitelistOption, rewriteConfigCrdtWhitelistOption, NULL),
+    createSpecialConfig("multi-master-whitelist", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigMultimasterWhitelistOption, getConfigMultimasterWhitelistOption, rewriteConfigMultimasterWhitelistOption, NULL),
     createSpecialConfig("client-output-buffer-limit", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigClientOutputBufferLimitOption, getConfigClientOutputBufferLimitOption, rewriteConfigClientOutputBufferLimitOption, NULL),
     createSpecialConfig("oom-score-adj-values", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigOOMScoreAdjValuesOption, getConfigOOMScoreAdjValuesOption, rewriteConfigOOMScoreAdjValuesOption, updateOOMScoreAdj),
     createSpecialConfig("notify-keyspace-events", NULL, MODIFIABLE_CONFIG, setConfigNotifyKeyspaceEventsOption, getConfigNotifyKeyspaceEventsOption, rewriteConfigNotifyKeyspaceEventsOption, NULL),

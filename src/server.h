@@ -467,9 +467,9 @@ typedef enum {
  *     idx:      1            2        3          4           5             6       7+
  * (index 0 -> "RREPLAY" string itself). 
  * Additional Note: The CRDT metadata field is a RESP bulk string carrying per-CRDT data, or the sentinel "none". */
-#define RREPLAY_CRDT_META_IDX 5
-#define RREPLAY_PAYLOAD_START_IDX 6
-#define RREPLAY_CRDT_META_NONE "none"
+#define RREPLAY_META_IDX 5
+#define RREPLAY_CMD_START_IDX 6
+#define RREPLAY_META_NONE "none"
 
 /* Replica requirements */
 #define REPLICA_REQ_NONE 0
@@ -3292,7 +3292,7 @@ ssize_t syncReadLine(int fd, char *ptr, ssize_t size, long long timeout);
 int prepareReplicasToWrite(void);
 void replicationFeedReplicas(int dictid, robj **argv, int argc);
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc);
-int isCrdtWhitelistedCommand(struct serverCommand *cmd);
+int isMultimasterWhitelistedCommand(struct serverCommand *cmd);
 void replicationFeedStreamFromPrimaryStream(char *buf, size_t buflen);
 void replicationDetachUpstreamRuntimeClient(client *c);
 void resetReplicationBuffer(void);

@@ -1761,22 +1761,22 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
 typedef struct {
     int has_metadata; /* 0 for "none", 1 present. */
     sds raw;          /* Raw metadata blob. Points into argv. */
-} crdtMetadata;
+} multimasterMetadata;
 
 /* Parse and validate the metadata field of an inbound RREPLAY frame.
  * 
- * 'meta' is the raw bulk-string value at index RREPLAY_CRDT_META_IDX.
+ * 'meta' is the raw bulk-string value at index RREPLAY_META_IDX.
  * Returns `C_OK` and fills '*out' on success, or `C_ERR` on error.
  * Currently only "none" sentinel is accepted, once more CRDTs parsings are implemented,
  * we can add them here.
  * per-CRDT branches will be added here as strategies are implemented. */
-static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, crdtMetadata *out) {
+static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multimasterMetadata *out) {
     UNUSED(cmd);
 
     out->raw = meta;
     out->has_metadata = 0;
 
-    if (meta != NULL && !strcmp(meta, RREPLAY_CRDT_META_NONE)) return C_OK;
+    if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
 
     /* CRDT parsing for the different types go here.
      * cc @Atharva, @Mahilan, Anirudh */
@@ -1791,7 +1791,7 @@ static robj *rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv
     UNUSED(cmd);
     UNUSED(argv);
     UNUSED(argc);
-    return createStringObject(RREPLAY_CRDT_META_NONE,strlen(RREPLAY_CRDT_META_NONE));
+    return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
 }
 
 /* Return the pointer to a string representing the replica ip:listening_port
@@ -2464,10 +2464,8 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     /* CRDT whitelist gate. 
      * `processCommand()` will reject non-whitelisted writes before they reach here, 
      * but a commands can slip through through other paths (eg: alsoPropagate),
-     * to be a 100% we perform a check on the RREPLAY as well.
-     * Checking is before risky-RMW canonicalization so the decision is made on the original
-     * user command. Skipped when the whitelist is empty. */
-    if (dictSize(server.crdt_whitelist) > 0 && !isCrdtWhitelistedCommand(payload_cmd)) {
+     * to be a 100% we perform a check on the RREPLAY as well. */
+    if (dictSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
         serverLog(LL_WARNING, "Skipping RREPLAY for non-whitelisted command '%s'",
                   payload_cmd ? payload_cmd->fullname : (argv[0] ? (char *)objectGetVal(argv[0]) : "?"));
         return;
@@ -2501,7 +2499,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     snprintf(replay_tie_break, sizeof(replay_tie_break), "%s:%llu", server.runid, replay_id);
     hlcStampCommandKeys(payload_cmd, payload_argv, payload_argc, dictid, hlc_ts, replay_tie_break);
 
-    int frame_argc = payload_argc + RREPLAY_PAYLOAD_START_IDX;
+    int frame_argc = payload_argc + RREPLAY_CMD_START_IDX;
     robj **frame_argv = zmalloc(sizeof(robj *) * frame_argc);
     frame_argv[0] = createStringObject("RREPLAY", 7);
     frame_argv[1] = createStringObject(server.runid, CONFIG_RUN_ID_SIZE);
@@ -2516,10 +2514,10 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
     /* CRDT metadata field (index 5). Currently the "none" sentinel; 
      * future per-CRDT strategies will populate it via rreplayCrdtMetadataSerialize. */
-    frame_argv[RREPLAY_CRDT_META_IDX] = rreplayCrdtMetadataSerialize(payload_cmd, payload_argv, payload_argc);
+    frame_argv[RREPLAY_META_IDX] = rreplayCrdtMetadataSerialize(payload_cmd, payload_argv, payload_argc);
     for (int j = 0; j < payload_argc; j++) {
-        frame_argv[j + RREPLAY_PAYLOAD_START_IDX] = payload_argv[j];
-        incrRefCount(frame_argv[j + RREPLAY_PAYLOAD_START_IDX]);
+        frame_argv[j + RREPLAY_CMD_START_IDX] = payload_argv[j];
+        incrRefCount(frame_argv[j + RREPLAY_CMD_START_IDX]);
     }
 
     /* In active-replica multi-master mode, RREPLAY frames must enter the local
@@ -3684,8 +3682,8 @@ void rreplayCommand(client *c) {
         server.hlc_clock.wall_time = max_wall;
     }
 
-    int payload_argc = c->argc - RREPLAY_PAYLOAD_START_IDX;
-    robj **payload_argv = c->argv + RREPLAY_PAYLOAD_START_IDX;
+    int payload_argc = c->argc - RREPLAY_CMD_START_IDX;
+    robj **payload_argv = c->argv + RREPLAY_CMD_START_IDX;
     struct serverCommand *payload_cmd = lookupCommand(payload_argv, payload_argc);
     if (!payload_cmd) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: unknown command '%s'",
@@ -3694,21 +3692,21 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    /* Validate the CRDT metadata field (id 5). 
-     * Skip unrecognized format - (rreplayCrdtMetadataParse emits the warning) */
-    crdtMetadata parsed_meta;
-    sds crdt_meta = objectGetVal(c->argv[RREPLAY_CRDT_META_IDX]);
-    if (rreplayCrdtMetadataParse(crdt_meta, payload_cmd, &parsed_meta) != C_OK) {
+    /* CRDT whitelist gate. 
+     * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
+     * Skip when the whitelist is empty. */
+    if (dictSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
+        serverLog(LL_WARNING, "Skipping non-whitelisted RREPLAY command '%s'", payload_cmd->fullname);
         if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
         if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
         return;
     }
 
-    /* CRDT whitelist gate. 
-     * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
-     * Skip when the whitelist is empty. */
-    if (dictSize(server.crdt_whitelist) > 0 && !isCrdtWhitelistedCommand(payload_cmd)) {
-        serverLog(LL_WARNING, "Skipping non-whitelisted RREPLAY command '%s'", payload_cmd->fullname);
+    /* Validate the metadata field (id 5). 
+     * Skip unrecognized format - (rreplayCrdtMetadataParse emits the warning) */
+    multimasterMetadata parsed_meta;
+    sds crdt_meta = objectGetVal(c->argv[RREPLAY_META_IDX]);
+    if (rreplayCrdtMetadataParse(crdt_meta, payload_cmd, &parsed_meta) != C_OK) {
         if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
         if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
         return;
