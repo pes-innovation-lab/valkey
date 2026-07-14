@@ -1589,7 +1589,7 @@ static int rreplayCommandIsRiskyRmw(struct serverCommand *cmd) {
     return (cmd->proc == appendCommand || cmd->proc == getsetCommand ||
             cmd->proc == incrCommand || cmd->proc == decrCommand ||
             cmd->proc == incrbyCommand || cmd->proc == decrbyCommand ||
-            cmd->proc == incrbyfloatCommand || cmd->proc == hincrbyCommand ||
+            cmd->proc == incrbyfloatCommand ||
             cmd->proc == hincrbyfloatCommand || cmd->proc == zincrbyCommand);
 }
 
@@ -1645,7 +1645,7 @@ static robj **rreplayBuildCanonicalRmwPayload(int dbid, struct serverCommand *cm
         return payload;
     }
 
-    if (cmd->proc == hincrbyCommand || cmd->proc == hincrbyfloatCommand) {
+    if (cmd->proc == hincrbyfloatCommand) {
         if (argc != 4) {
             if (reason) *reason = "HINCR* arity mismatch";
             return NULL;
