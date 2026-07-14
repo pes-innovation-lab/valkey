@@ -364,14 +364,14 @@ void exitFromChild(int retcode) {
  * keys and Objects as values (Objects can hold SDS strings,
  * lists, sets). */
 
-const void *whitelistGetEntry(const void *entry){
+const void *whitelistGetEntry(const void *entry) {
     const whitelistEntry *we = entry;
     return (void *)we->name;
 }
 
-void whitelistEntryDestructor(void *entry){
+void whitelistEntryDestructor(void *entry) {
     whitelistEntry *we = entry;
-    if (we==NULL) return;
+    if (we == NULL) return;
 
     sdsfree(we->name);
 
@@ -3634,20 +3634,20 @@ bool clientSupportStandAloneRedirect(client *c) {
 int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
     if (cmd == NULL) return 0;
     void *entry = NULL;
-    return hashtableFind(server.crdt_whitelist, cmd->fullname,&entry);
+    return hashtableFind(server.crdt_whitelist, cmd->fullname, &entry);
 }
 
-void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler){
+void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler) {
     void *entry = NULL;
-    if(hashtableFind(server.crdt_whitelist,cmd_name,&entry)){
+    if (hashtableFind(server.crdt_whitelist, cmd_name, &entry)) {
         whitelistEntry *we = entry;
         we->handler = handler;
     }
 }
 
-CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd){
+CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd) {
     void *entry = NULL;
-    if(hashtableFind(server.crdt_whitelist,cmd->fullname,&entry)){
+    if (hashtableFind(server.crdt_whitelist, cmd->fullname, &entry)) {
         whitelistEntry *we = entry;
         return we->handler;
     }
@@ -4534,8 +4534,8 @@ int processCommand(client *c) {
     /* whitelist check for multi-master mode.
      * A write command sent by an external client must have an explicit conflict resolution strategy,
      * and if that is the case, the command must be whitelisted in the config,
-     * otherwise it is rejected here. 
-     * So it is neither applied locally nor forwarded via RREPLAY, 
+     * otherwise it is rejected here.
+     * So it is neither applied locally nor forwarded via RREPLAY,
      * this ensures peers don't diverge.
      *
      * Skipped when:
@@ -4546,7 +4546,7 @@ int processCommand(client *c) {
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
         hashtableSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
         rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
-        serverLog(LL_WARNING,"command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
+        serverLog(LL_WARNING, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;
     }
 
@@ -7518,8 +7518,8 @@ void dismissMemoryInChild(void) {
     /* madvise(MADV_DONTNEED) may not work if Transparent Huge Pages is enabled. */
     if (server.thp_enabled) return;
 
-    /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
-     * so we avoid these pointless loops when they're not going to do anything. */
+        /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
+         * so we avoid these pointless loops when they're not going to do anything. */
 #if defined(USE_JEMALLOC) && defined(__linux__)
     listIter li;
     listNode *ln;

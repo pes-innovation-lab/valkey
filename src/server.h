@@ -3372,7 +3372,7 @@ sds replicationSendAuth(connection *conn);
 sds receiveSynchronousResponse(connection *conn);
 ConnectionType *connTypeOfReplication(void);
 robj *generateSelectCommand(int dictid);
-void registerCrdtCommandHandler(const char *cmd_name, CrdtCommandHandler *handler);
+void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler);
 CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd);
 
 /* Generic persistence functions */

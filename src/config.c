@@ -1443,21 +1443,21 @@ void rewriteConfigSaveOption(standardConfig *config, const char *name, struct re
     rewriteConfigMarkAsProcessed(state, name);
 }
 
-/* Emit a single 'multi-master-whitelist cmd1 cmd2 ...' line listing every whitelisted command. 
-* Accepts a space-separated list.
-* When the whitelist is empty - nothing is written and also mark rewrite config as processed. */
+/* Emit a single 'multi-master-whitelist cmd1 cmd2 ...' line listing every whitelisted command.
+ * Accepts a space-separated list.
+ * When the whitelist is empty - nothing is written and also mark rewrite config as processed. */
 void rewriteConfigMultimasterWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
     UNUSED(config);
 
     if (hashtableSize(server.crdt_whitelist)) {
         sds line = sdsnew(name);
-        dictIterator *di = hashtableCreateIterator(server.crdt_whitelist,0);
+        dictIterator *di = hashtableCreateIterator(server.crdt_whitelist, 0);
         void *entry = NULL;
-        while (hashtableNext(di,&entry)) {
+        while (hashtableNext(di, &entry)) {
             line = sdscatfmt(line, " %S", (sds)entry);
         }
         hashtableReleaseIterator(di);
-        rewriteConfigRewriteLine(state, name, line, 1); /* Last parameter is for forced write - 
+        rewriteConfigRewriteLine(state, name, line, 1); /* Last parameter is for forced write -
                                                          * overwrite and modify in memory, not persisted to disk*/
     }
 
@@ -2399,8 +2399,8 @@ static void numericConfigRewrite(standardConfig *config, const char *name, struc
     }
 
 #define createSpecialConfig(name, alias, modifiable, setfn, getfn, rewritefn, applyfn) \
-    {.type = SPECIAL_CONFIG,                                                           \
-     embedCommonConfig(name, alias, modifiable) embedConfigInterface(NULL, setfn, getfn, rewritefn, applyfn)}
+    { .type = SPECIAL_CONFIG,                                                          \
+      embedCommonConfig(name, alias, modifiable) embedConfigInterface(NULL, setfn, getfn, rewritefn, applyfn) }
 
 static int isValidActiveDefrag(int val, const char **err) {
 #ifndef HAVE_DEFRAG
@@ -2981,7 +2981,7 @@ static sds getConfigSaveOption(standardConfig *config) {
     return buf;
 }
 
-/* Populate server.multi_master_whitelist from a list of command names. 
+/* Populate server.multi_master_whitelist from a list of command names.
  *  Each name must resolve to a known command via lookupCommandBySds().
  *
  * At runtime 'CONFIG SET multi-master-whitelist "..."' replaces the whole whitelist,
@@ -3012,11 +3012,11 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
     for (j = 0; j < argc; j++) {
         struct serverCommand *cmd = lookupCommandBySds(argv[j]);
         if (!cmd)
-        continue;
+            continue;
         whitelistEntry *we = zmalloc(sizeof(whitelistEntry));
         we->name = sdsdup(cmd->fullname);
         we->handler = NULL;
-        if(!hashtableAdd(server.crdt_whitelist, we)){
+        if (!hashtableAdd(server.crdt_whitelist, we)) {
             sdsfree(we->name);
             zfree(we);
         }
@@ -3030,10 +3030,10 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
 static sds getConfigMultimasterWhitelistOption(standardConfig *config) {
     UNUSED(config);
     sds buf = sdsempty();
-    dictIterator *di = hashtableCreateIterator(server.crdt_whitelist,0);
+    dictIterator *di = hashtableCreateIterator(server.crdt_whitelist, 0);
     int first = 1;
     void *entry = NULL;
-    while(hashtableNext(di,&entry)){
+    while (hashtableNext(di, &entry)) {
         whitelistEntry *we = entry;
         if (!first) buf = sdscatlen(buf, " ", 1);
 
@@ -3583,7 +3583,7 @@ standardConfig static_configs[] = {
     /* hlc-rdb-clock-max-entries controls the maximum number of persisted HLC key clocks in RDB AUX. */
     createLongLongConfig("hlc-rdb-clock-max-entries", NULL, MODIFIABLE_CONFIG, 0, LLONG_MAX, server.hlc_rdb_clock_max_entries, CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES, INTEGER_CONFIG, NULL, NULL),
     /* hlc-max-clock-drift is the maximum tolerated drift (in microseconds) between the HLC wall
-     * time and the local physical clock. 
+     * time and the local physical clock.
      * Set to 0 to disable checks. Default: 500 ms. */
     createLongLongConfig("hlc-max-clock-drift", NULL, MODIFIABLE_CONFIG, 0, LLONG_MAX, server.hlc_max_clock_drift, CONFIG_DEFAULT_HLC_MAX_CLOCK_DRIFT_USEC, INTEGER_CONFIG, NULL, NULL),
     createLongLongConfig("cluster-manual-failover-timeout", NULL, MODIFIABLE_CONFIG, 1, INT_MAX, server.cluster_mf_timeout, 5000, INTEGER_CONFIG, NULL, NULL),
