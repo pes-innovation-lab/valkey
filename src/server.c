@@ -792,6 +792,12 @@ hashtableType kvstoreChannelHashtableType = {
 
 /* Modules system dictionary type. Keys are module name,
  * values are pointer to ValkeyModule struct. */
+hashtableType multimasterWhitelistType = {
+    .entryGetKey = hashtableCommandGetCurrentName,
+    .hashFunction = dictSdsCaseHash,
+    .keyCompare = dictSdsKeyCaseCompare,
+};
+
 dictType modulesDictType = {
     .entryGetKey = dictEntryGetKey,
     .hashFunction = dictSdsCaseHash,
@@ -2388,7 +2394,7 @@ void initServerConfig(void) {
     server.active_replica = 0;
     server.multi_master = 0;
     server.multi_master_no_forward = 0;
-    server.crdt_whitelist = dictCreate(&modulesDictType);
+    server.crdt_whitelist = hashtableCreate(&multimasterWhitelistType);
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
@@ -4505,7 +4511,7 @@ int processCommand(client *c) {
      * - command arrives from replication link / fake client,
      * - whitelist is empty. */
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
-        dictSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
+        hashtableSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
         rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         serverLog(LL_WARNING,"command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;

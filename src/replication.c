@@ -2465,7 +2465,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
      * `processCommand()` will reject non-whitelisted writes before they reach here, 
      * but a commands can slip through through other paths (eg: alsoPropagate),
      * to be a 100% we perform a check on the RREPLAY as well. */
-    if (dictSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
+    if (hashtableSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
         serverLog(LL_WARNING, "Skipping RREPLAY for non-whitelisted command '%s'",
                   payload_cmd ? payload_cmd->fullname : (argv[0] ? (char *)objectGetVal(argv[0]) : "?"));
         return;
@@ -3695,7 +3695,7 @@ void rreplayCommand(client *c) {
     /* CRDT whitelist gate. 
      * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
      * Skip when the whitelist is empty. */
-    if (dictSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
+    if (hashtableSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
         serverLog(LL_WARNING, "Skipping non-whitelisted RREPLAY command '%s'", payload_cmd->fullname);
         if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
         if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);

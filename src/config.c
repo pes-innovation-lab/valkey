@@ -1449,14 +1449,14 @@ void rewriteConfigSaveOption(standardConfig *config, const char *name, struct re
 void rewriteConfigMultimasterWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
     UNUSED(config);
 
-    if (dictSize(server.crdt_whitelist)) {
+    if (hashtableSize(server.crdt_whitelist)) {
         sds line = sdsnew(name);
-        dictIterator *di = dictGetIterator(server.crdt_whitelist);
-        dictEntry *de;
-        while ((de = dictNext(di)) != NULL) {
-            line = sdscatfmt(line, " %S", (sds)dictGetKey(de));
+        dictIterator *di = hashtableCreateIterator(server.crdt_whitelist,0);
+        void *entry = NULL;
+        while (hashtableNext(di,&entry)) {
+            line = sdscatfmt(line, " %S", (sds)entry);
         }
-        dictReleaseIterator(di);
+        hashtableReleaseIterator(di);
         rewriteConfigRewriteLine(state, name, line, 1); /* Last parameter is for forced write - 
                                                          * overwrite and modify in memory, not persisted to disk*/
     }
@@ -3004,15 +3004,14 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
         }
     }
 
-    if (!reading_config_file) dictEmpty(server.crdt_whitelist, NULL);
+    if (!reading_config_file) hashtableEmpty(server.crdt_whitelist, NULL);
 
     /* Add the validated commands to the whitelist;
      * If a command is already in the dict, dictAdd returns DICT_ERR
      * so we free this duplicate string to prevent memory leaks. */
     for (j = 0; j < argc; j++) {
         struct serverCommand *cmd = lookupCommandBySds(argv[j]);
-        sds name = sdsdup(cmd->fullname);
-        if (dictAdd(server.crdt_whitelist, name, cmd) != DICT_OK) sdsfree(name);
+        hashtableAdd(server.crdt_whitelist, cmd);
     }
 
     return 1;
@@ -3023,19 +3022,17 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
 static sds getConfigMultimasterWhitelistOption(standardConfig *config) {
     UNUSED(config);
     sds buf = sdsempty();
-    dictIterator *di = dictGetIterator(server.crdt_whitelist);
-    dictEntry *de;
+    dictIterator *di = hashtableCreateIterator(server.crdt_whitelist,0);
     int first = 1;
+    void *entry = NULL;
+    while(hashtableNext(di,&entry)){
+        struct serverCommand *cmd = entry;
+        if (!first) buf = sdscatlen(buf, " ", 1);
 
-    while ((de = dictNext(di)) != NULL) {
-        if (!first) buf = sdscatlen(buf, " ", 1); /* If this is not the first command being processed in the loop, 
-                                                   * it appends a single space character " " to the string buffer. 
-                                                   * This prevents adding a leading space at the very beginning of the string, 
-                                                   * while ensuring all subsequent commands are separated by a space. */
-        buf = sdscatsds(buf, (sds)dictGetKey(de));
+        buf = sdscatsds(buf, cmd->fullname);
         first = 0;
     }
-    dictReleaseIterator(di);
+    hashtableReleaseIterator(di);
 
     return buf;
 }
