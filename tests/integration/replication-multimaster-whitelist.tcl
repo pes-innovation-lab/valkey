@@ -1,4 +1,4 @@
-# CRDT command whitelist and RREPLAY CRDT-metadata field.
+# Multimaster command whitelist and RREPLAY metadata field.
 
 start_server {tags {"repl external:skip"}} {
     start_server {overrides {save {}}} {

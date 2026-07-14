@@ -2485,7 +2485,7 @@ struct valkeyServer {
 };
 
 
-/* CRDT Command handler */
+/* Multimaster Command handler */
 typedef int (*crdtMetadataParseFn)(sds raw, void **parsed);
 typedef void (*crdtMetadataFreeFn)(void *parsed);
 typedef robj *(*crdtMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);

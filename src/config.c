@@ -3007,8 +3007,8 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
     if (!reading_config_file) hashtableEmpty(server.crdt_whitelist, NULL);
 
     /* Add the validated commands to the whitelist;
-     * If a command is already in the dict, dictAdd returns DICT_ERR
-     * so we free this duplicate string to prevent memory leaks. */
+     * If a command is already in the dict, 
+     * we free this duplicate string to prevent memory leaks. */
     for (j = 0; j < argc; j++) {
         struct serverCommand *cmd = lookupCommandBySds(argv[j]);
         if (!cmd)

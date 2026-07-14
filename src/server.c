@@ -364,17 +364,18 @@ void exitFromChild(int retcode) {
  * keys and Objects as values (Objects can hold SDS strings,
  * lists, sets). */
 
+
+/* entryGetKey handler for multimasterWhitelistType */
 const void *whitelistGetEntry(const void *entry) {
     const whitelistEntry *we = entry;
     return (void *)we->name;
 }
 
+/* entryDestructor handler for multimasterWhitelistType */
 void whitelistEntryDestructor(void *entry) {
     whitelistEntry *we = entry;
     if (we == NULL) return;
-
     sdsfree(we->name);
-
     zfree(we);
 }
 
@@ -804,8 +805,8 @@ hashtableType kvstoreChannelHashtableType = {
     .getMetadataSize = kvstoreHashtableMetadataSize,
 };
 
-/* Modules system dictionary type. Keys are module name,
- * values are pointer to ValkeyModule struct. */
+/* Multimaster command whitelist type. Keys are command names
+ * values are pointers to whitelistEntry struct.  */
 hashtableType multimasterWhitelistType = {
     .entryGetKey = whitelistGetEntry,
     .hashFunction = dictSdsCaseHash,
@@ -813,6 +814,8 @@ hashtableType multimasterWhitelistType = {
     .entryDestructor = whitelistEntryDestructor,
 };
 
+/* Modules system dictionary type. Keys are module name,
+ * values are pointer to ValkeyModule struct. */
 dictType modulesDictType = {
     .entryGetKey = dictEntryGetKey,
     .hashFunction = dictSdsCaseHash,

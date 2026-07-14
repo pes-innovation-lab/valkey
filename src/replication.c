@@ -1761,21 +1761,23 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
 typedef struct {
     int has_metadata; /* 0 for "none", 1 present. */
     sds raw;          /* Raw metadata blob. Points into argv. */
-    CrdtCommandHandler *handler;
-    void *parsed;
+    CrdtCommandHandler *handler; /* handler for the command that requires this metadata */
+    void *parsed; /* parsed metadata */
 } multimasterMetadata;
 
 /* Parse and validate the metadata field of an inbound RREPLAY frame.
  * 
  * 'meta' is the raw bulk-string value at index RREPLAY_META_IDX.
  * Returns `C_OK` and fills '*out' on success, or `C_ERR` on error.
- * Currently only "none" sentinel is accepted, once more CRDTs parsings are implemented,
- * we can add them here.
- * per-CRDT branches will be added here as strategies are implemented. */
+ * Calls the respective command's parse handler. Set the function for parsing
+ * metadata using the registerCrdtCommandHandler() function 
+ * This function requires the executing command to have a handler struct associated with it */
 static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multimasterMetadata *out) {
 
     out->raw = meta;
     out->has_metadata = 0;
+    out->parsed = NULL;
+    out->handler = NULL;
 
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
     CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
@@ -1796,7 +1798,8 @@ static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multima
 
 /* Produce the CRDT metadata field for an outbound RREPLAY frame. 
  * Currently a stub that always emits the "none" sentinel; 
- * per-command CRDT implementations will generate specific metadata here. (cc @Atharva, @Anirudh, @Mahilan) */
+ * Calls the serialize function registered with the command handler of the executing command 
+ * This function requires the executing command to have a handler struct associated with it */
 static robj *rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
     CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
     if (handler) return handler->serialize(cmd,argv,argc);
