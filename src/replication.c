@@ -1773,12 +1773,10 @@ typedef struct {
  * metadata using the registerCrdtCommandHandler() function 
  * This function requires the executing command to have a handler struct associated with it */
 static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multimasterMetadata *out) {
-
     out->raw = meta;
     out->has_metadata = 0;
     out->parsed = NULL;
     out->handler = NULL;
-
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
     CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
     if (!handler) return C_ERR;
@@ -1791,9 +1789,6 @@ static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multima
     out->parsed = parsed;
     out->handler = handler;
     return C_OK;
-    /* CRDT parsing for the different types go here.
-     * cc @Atharva, @Mahilan, Anirudh */
-    
 }
 
 /* Produce the CRDT metadata field for an outbound RREPLAY frame. 
