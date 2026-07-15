@@ -3374,7 +3374,6 @@ sds receiveSynchronousResponse(connection *conn);
 ConnectionType *connTypeOfReplication(void);
 robj *generateSelectCommand(int dictid);
 void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler);
-CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd);
 
 /* Generic persistence functions */
 void startLoadingFile(size_t size, char *filename, int rdbflags);

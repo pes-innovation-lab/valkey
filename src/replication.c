@@ -1758,13 +1758,6 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
     return 1;
 }
 
-typedef struct {
-    int has_metadata; /* 0 for "none", 1 present. */
-    sds raw;          /* Raw metadata blob. Points into argv. */
-    CrdtCommandHandler *handler; /* handler for the command that requires this metadata */
-    void *parsed; /* parsed metadata */
-} multimasterMetadata;
-
 /* Parse and validate the metadata field of an inbound RREPLAY frame.
  * 
  * 'meta' is the raw bulk-string value at index RREPLAY_META_IDX.
@@ -1772,11 +1765,7 @@ typedef struct {
  * Calls the respective command's parse handler. Set the function for parsing
  * metadata using the registerCrdtCommandHandler() function 
  * This function requires the executing command to have a handler struct associated with it */
-static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multimasterMetadata *out) {
-    out->raw = meta;
-    out->has_metadata = 0;
-    out->parsed = NULL;
-    out->handler = NULL;
+static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd) {
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
     CrdtCommandHandler *handler = cmd->command_handler;
     if (!handler) return C_ERR;
@@ -1785,9 +1774,7 @@ static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multima
         serverLog(LL_WARNING, "Unsupported CRDT metadata format: %s", meta ? meta : "(null)");
         return C_ERR;
     }
-    out->has_metadata = 1;
-    out->parsed = parsed;
-    out->handler = handler;
+    handler->parsed = parsed;
     return C_OK;
 }
 
@@ -3711,9 +3698,8 @@ void rreplayCommand(client *c) {
 
     /* Validate the metadata field (id 5). 
      * Skip unrecognized format - (rreplayCrdtMetadataParse emits the warning) */
-    multimasterMetadata parsed_meta;
     sds crdt_meta = objectGetVal(c->argv[RREPLAY_META_IDX]);
-    if (rreplayCrdtMetadataParse(crdt_meta, payload_cmd, &parsed_meta) != C_OK) {
+    if (rreplayCrdtMetadataParse(crdt_meta, payload_cmd) != C_OK) {
         if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
         if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
         return;

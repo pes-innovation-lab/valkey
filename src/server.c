@@ -364,21 +364,6 @@ void exitFromChild(int retcode) {
  * keys and Objects as values (Objects can hold SDS strings,
  * lists, sets). */
 
-
-// /* entryGetKey handler for multimasterWhitelistType */
-// const void *whitelistGetEntry(const void *entry) {
-//     const whitelistEntry *we = entry;
-//     return (void *)we->name;
-// }
-
-// /* entryDestructor handler for multimasterWhitelistType */
-// void whitelistEntryDestructor(void *entry) {
-//     whitelistEntry *we = entry;
-//     if (we == NULL) return;
-//     sdsfree(we->name);
-//     zfree(we);
-// }
-
 void dictVanillaFree(void *val) {
     zfree(val);
 }
@@ -3647,10 +3632,6 @@ void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler) {
         we->command_handler = handler;
     }
 }
-
-// CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd) {
-//     return cmd->command_handler;
-// }
 
 static int shouldForwardToPrimaryViaRReplay(int target) {
     if (!(target & PROPAGATE_REPL)) return 0;
@@ -7517,8 +7498,8 @@ void dismissMemoryInChild(void) {
     /* madvise(MADV_DONTNEED) may not work if Transparent Huge Pages is enabled. */
     if (server.thp_enabled) return;
 
-        /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
-         * so we avoid these pointless loops when they're not going to do anything. */
+    /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
+        * so we avoid these pointless loops when they're not going to do anything. */
 #if defined(USE_JEMALLOC) && defined(__linux__)
     listIter li;
     listNode *ln;
