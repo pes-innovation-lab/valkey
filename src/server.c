@@ -790,15 +790,6 @@ hashtableType kvstoreChannelHashtableType = {
     .getMetadataSize = kvstoreHashtableMetadataSize,
 };
 
-// /* Multimaster command whitelist type. Keys are command names
-//  * values are pointers to whitelistEntry struct.  */
-// hashtableType multimasterWhitelistType = {
-//     .entryGetKey = whitelistGetEntry,
-//     .hashFunction = dictSdsCaseHash,
-//     .keyCompare = dictSdsKeyCaseCompare,
-//     .entryDestructor = whitelistEntryDestructor,
-// };
-
 /* Modules system dictionary type. Keys are module name,
  * values are pointer to ValkeyModule struct. */
 dictType modulesDictType = {
