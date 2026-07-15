@@ -1454,7 +1454,9 @@ void rewriteConfigMultimasterWhitelistOption(standardConfig *config, const char 
         dictIterator *di = hashtableCreateIterator(server.multi_master_whitelist, 0);
         void *entry = NULL;
         while (hashtableNext(di, &entry)) {
-            line = sdscatfmt(line, " %S", (sds)entry);
+            struct serverCommand *cmd = entry;
+            line = sdscatlen(line, " ", 1);
+            line = sdscatsds(line, cmd->fullname);
         }
         hashtableReleaseIterator(di);
         rewriteConfigRewriteLine(state, name, line, 1); /* Last parameter is for forced write -
@@ -2992,14 +2994,14 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
     int j;
 
     /* Treat a single empty argument as a request to clear the
-     * whitelist (e.g. CONFIG SET crdt-whitelist ""). */
+     * whitelist (e.g. CONFIG SET multi-master-whitelist ""). */
     if (argc == 1 && sdslen(argv[0]) == 0) argc = 0;
 
     /* Validate every command name before mutating the whitelist so an invalid
      * entry leaves the current whitelist untouched. */
     for (j = 0; j < argc; j++) {
         if (lookupCommandBySds(argv[j]) == NULL) {
-            *err = "No such command in crdt-whitelist";
+            *err = "No such command in multi-master-whitelist";
             return 0;
         }
     }

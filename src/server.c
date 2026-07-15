@@ -4001,6 +4001,10 @@ void call(client *c, int flags) {
             debug_argv_refcount[i] = c->original_argv ? c->original_argv[i]->refcount : c->argv[i]->refcount;
         }
     }
+    
+    /* multimaster whitelisted commands are checked for any registered handlers
+     * it is expected that the entire command execution flow is handled in the resolve function
+     * the vanilla valkey command handler will not run if the command is multimaster whitelisted */
     multimasterCommandHandler *handler = c->cmd->command_handler;
     if (handler && handler->resolve) handler->resolve(handler->parsed,c);
     else c->cmd->proc(c);

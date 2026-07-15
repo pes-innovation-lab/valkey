@@ -466,7 +466,7 @@ typedef enum {
  *   RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...]
  *     idx:      1            2        3          4           5             6       7+
  * (index 0 -> "RREPLAY" string itself). 
- * Additional Note: The metadata field is a RESP bulk string carrying per-CRDT data, or the sentinel "none". */
+ * Additional Note: The metadata field is a RESP bulk string carrying per-command data, or the sentinel "none". */
 #define RREPLAY_META_IDX 5
 #define RREPLAY_CMD_START_IDX 6
 #define RREPLAY_META_NONE "none"
@@ -2488,12 +2488,12 @@ struct valkeyServer {
 /* Multimaster Command handler */
 typedef int (*multimasterMetadataParseFn)(sds raw, void **parsed);
 typedef robj *(*multimasterMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);
-typedef void *(*multimasterConflictResolveFn)(void *metadata, client *c);
+typedef void (*multimasterResolveFn)(void *metadata, client *c);
 
 typedef struct {
     multimasterMetadataParseFn parse;
     multimasterMetadataSerializeFn serialize;
-    multimasterConflictResolveFn resolve;
+    multimasterResolveFn resolve;
     void *parsed;
 } multimasterCommandHandler;
 

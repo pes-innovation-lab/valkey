@@ -1770,14 +1770,14 @@ static int rreplayMultimasterMetadataParse(sds meta, struct serverCommand *cmd) 
     if (!handler) return C_ERR;
     void *parsed = NULL;
     if (handler->parse(meta, &parsed) != C_OK){
-        serverLog(LL_WARNING, "Unsupported CRDT metadata format: %s", meta ? meta : "(null)");
+        serverLog(LL_WARNING, "Unsupported metadata format: %s", meta ? meta : "(null)");
         return C_ERR;
     }
     handler->parsed = parsed;
     return C_OK;
 }
 
-/* Produce the CRDT metadata field for an outbound RREPLAY frame. 
+/* Produce the metadata field for an outbound RREPLAY frame. 
  * Currently a stub that always emits the "none" sentinel; 
  * Calls the serialize function registered with the command handler of the executing command 
  * This function requires the executing command to have a handler struct associated with it */
@@ -2454,7 +2454,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     int payload_argc = argc;
     int payload_owned = 0;
 
-    /* CRDT whitelist gate. 
+    /* multimaster whitelist gate. 
      * `processCommand()` will reject non-whitelisted writes before they reach here, 
      * but a commands can slip through through other paths (eg: alsoPropagate),
      * to be a 100% we perform a check on the RREPLAY as well. */
@@ -2505,8 +2505,8 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
                            (unsigned long long)hlc_ts.wall_time,
                            (unsigned long long)hlc_ts.logical);
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
-    /* CRDT metadata field (index 5). Currently the "none" sentinel; 
-     * future per-CRDT strategies will populate it via rreplayCrdtMetadataSerialize. */
+    /* metadata field (index 5). Currently the "none" sentinel; 
+     * future per-command strategies for multimaster will populate it via rreplayMultimasterMetadataSerialize. */
     frame_argv[RREPLAY_META_IDX] = rreplayMultimasterMetadataSerialize(payload_cmd, payload_argv, payload_argc);
     for (int j = 0; j < payload_argc; j++) {
         frame_argv[j + RREPLAY_CMD_START_IDX] = payload_argv[j];
@@ -3603,7 +3603,7 @@ void rreplayCommand(client *c) {
     }
 
     if (c->argc < 7) {
-        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp, CRDT metadata or payload command");
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp, metadata or payload command");
         freeClientAsync(c);
         return;
     }
@@ -3685,7 +3685,7 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    /* CRDT whitelist gate. 
+    /* multimaster whitelist gate. 
      * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
      * Skip when the whitelist is empty. */
     if (hashtableSize(server.multi_master_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
@@ -3696,9 +3696,9 @@ void rreplayCommand(client *c) {
     }
 
     /* Validate the metadata field (id 5). 
-     * Skip unrecognized format - (rreplayCrdtMetadataParse emits the warning) */
-    sds crdt_meta = objectGetVal(c->argv[RREPLAY_META_IDX]);
-    if (rreplayMultimasterMetadataParse(crdt_meta, payload_cmd) != C_OK) {
+     * Skip unrecognized format - (rreplayMultimasterMetadataParse emits the warning) */
+    sds command_meta = objectGetVal(c->argv[RREPLAY_META_IDX]);
+    if (rreplayMultimasterMetadataParse(command_meta, payload_cmd) != C_OK) {
         if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
         if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
         return;

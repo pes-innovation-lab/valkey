@@ -9,7 +9,7 @@ start_server {tags {"repl external:skip"}} {
         set node1_host [srv 0 host]
         set node1_port [srv 0 port]
 
-        test {CRDT whitelist: establish active-active link} {
+        test {Multimaster whitelist: establish active-active link} {
             $node0 config set active-replica yes
             $node0 config set multi-master yes
             $node0 config set replica-read-only no
@@ -62,6 +62,24 @@ start_server {tags {"repl external:skip"}} {
             assert_equal {} [lindex [$node0 config get multi-master-whitelist] 1]
         }
 
+        test {CONFIG REWRITE persists the whitelist} {
+            $node0 config set multi-master-whitelist "set hset"
+            $node0 config rewrite
+            set config_file [srv -1 config_file]
+            
+            # Read the config file and check for the whitelist
+            set fp [open $config_file r]
+            set config_content [read $fp]
+            close $fp
+            
+            # The config file should contain the line exactly as rewritten
+            assert_match {*multi-master-whitelist set hset*} $config_content
+            
+            # Clean up
+            $node0 config set multi-master-whitelist ""
+            $node0 config rewrite
+        }
+
         test {Empty whitelist allows all commands (backward compat)} {
             $node0 config set multi-master-whitelist ""
             $node0 del mm:wl:empty
@@ -69,7 +87,7 @@ start_server {tags {"repl external:skip"}} {
             assert_equal 3 [$node0 llen mm:wl:empty]
         }
 
-        test {CRDT metadata none round-trips through RREPLAY} {
+        test {Multimaster metadata none round-trips through RREPLAY} {
             $node0 del mm:meta:ok
             $node0 config set multi-master-whitelist "set"
             assert_equal OK [$node0 replconf capa rreplay-peer]
@@ -111,7 +129,7 @@ start_server {tags {"repl external:skip"}} {
             $node1 config set multi-master-whitelist ""
         }
 
-        test {Non-none CRDT metadata is rejected gracefully} {
+        test {Bad metadata is rejected gracefully} {
             $node0 del mm:meta:bad
             $node0 config set multi-master-whitelist "set"
             assert_equal OK [$node0 replconf capa rreplay-peer]
