@@ -3619,8 +3619,8 @@ int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
 void registerMultimasterCommandHandler(sds cmd_name, multimasterCommandHandler *handler) {
     void *entry = NULL;
     if (hashtableFind(server.multi_master_whitelist, cmd_name, &entry)) {
-        struct serverCommand *we = entry;
-        we->command_handler = handler;
+        struct serverCommand *sc = entry;
+        sc->command_handler = handler;
     }
 }
 
@@ -7494,7 +7494,7 @@ void dismissMemoryInChild(void) {
     if (server.thp_enabled) return;
 
     /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
-        * so we avoid these pointless loops when they're not going to do anything. */
+    * so we avoid these pointless loops when they're not going to do anything. */
 #if defined(USE_JEMALLOC) && defined(__linux__)
     listIter li;
     listNode *ln;
