@@ -2484,18 +2484,13 @@ struct valkeyServer {
     char *debug_context; /* A free-form string that has no impact on server except being included in a crash report. */
 };
 
+typedef struct multimasterCommandHandler_t multimasterCommandHandler;
 
-/* Multimaster Command handler */
-typedef int (*multimasterMetadataParseFn)(sds raw, void **parsed);
-typedef robj *(*multimasterMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);
-typedef void (*multimasterResolveFn)(void *metadata, client *c);
-
-typedef struct {
-    multimasterMetadataParseFn parse;
-    multimasterMetadataSerializeFn serialize;
-    multimasterResolveFn resolve;
-    void *parsed;
-} multimasterCommandHandler;
+struct multimasterCommandHandler_t{
+    int (*parse)(multimasterCommandHandler *self,sds raw);
+    robj *(*serialize)(struct serverCommand *cmd, robj **argv, int argc);
+    void (*resolve)(multimasterCommandHandler *self, client *c);
+};
 
 #define MAX_KEYS_BUFFER 256
 
@@ -3307,7 +3302,7 @@ ssize_t syncReadLine(int fd, char *ptr, ssize_t size, long long timeout);
 int prepareReplicasToWrite(void);
 void replicationFeedReplicas(int dictid, robj **argv, int argc);
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc);
-int isMultimasterWhitelistedCommand(struct serverCommand *cmd);
+multimasterCommandHandler *getMultimasterWhitelistedHandler(struct serverCommand *cmd);
 void replicationFeedStreamFromPrimaryStream(char *buf, size_t buflen);
 void replicationDetachUpstreamRuntimeClient(client *c);
 void resetReplicationBuffer(void);

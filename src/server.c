@@ -3610,10 +3610,13 @@ bool clientSupportStandAloneRedirect(client *c) {
     return !server.cluster_enabled && server.primary_host && c->capa & CLIENT_CAPA_REDIRECT;
 }
 
-int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
-    if (cmd == NULL) return 0;
+multimasterCommandHandler *getMultimasterWhitelistedHandler(struct serverCommand *cmd) {
     void *entry = NULL;
-    return hashtableFind(server.multi_master_whitelist, cmd->fullname, &entry);
+    if(hashtableFind(server.multi_master_whitelist, cmd->fullname, &entry)){
+        struct serverCommand *sc = (struct serverCommand *)entry;
+        return sc->command_handler;
+    }
+    return NULL;
 }
 
 void registerMultimasterCommandHandler(sds cmd_name, multimasterCommandHandler *handler) {
@@ -3993,12 +3996,7 @@ void call(client *c, int flags) {
         }
     }
     
-    /* multimaster whitelisted commands are checked for any registered handlers
-     * it is expected that the entire command execution flow is handled in the resolve function
-     * the vanilla valkey command handler will not run if the command is multimaster whitelisted */
-    multimasterCommandHandler *handler = c->cmd->command_handler;
-    if (handler && handler->resolve) handler->resolve(handler->parsed,c);
-    else c->cmd->proc(c);
+    c->cmd->proc(c);
 
     if (c->flag.argv_borrowed && server.enable_debug_assert) {
         robj **argv = c->original_argv ? c->original_argv : c->argv;
@@ -4519,7 +4517,8 @@ int processCommand(client *c) {
      * - command arrives from replication link / fake client,
      * - whitelist is empty. */
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
-        hashtableSize(server.multi_master_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
+        hashtableSize(server.multi_master_whitelist) > 0 && 
+        hashtableFind(server.multi_master_whitelist, c->cmd->fullname, NULL) == 0) {
         rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         serverLog(LL_WARNING, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;
@@ -4784,7 +4783,9 @@ int processCommand(client *c) {
         addReply(c, shared.queued);
     } else {
         int flags = CMD_CALL_FULL;
-        call(c, flags);
+        multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(c->cmd);
+        if (handler && handler->resolve) handler->resolve(handler,c);
+        else call(c, flags);
         if (listLength(server.ready_keys) && !isInsideYieldingLongCommand()) handleClientsBlockedOnKeys();
     }
     return C_OK;
@@ -7494,7 +7495,7 @@ void dismissMemoryInChild(void) {
     if (server.thp_enabled) return;
 
     /* Currently we use zmadvise_dontneed only when we use jemalloc with Linux.
-    * so we avoid these pointless loops when they're not going to do anything. */
+     * so we avoid these pointless loops when they're not going to do anything. */
 #if defined(USE_JEMALLOC) && defined(__linux__)
     listIter li;
     listNode *ln;

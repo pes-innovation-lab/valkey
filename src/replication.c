@@ -1766,14 +1766,12 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
  * This function requires the executing command to have a handler struct associated with it */
 static int rreplayMultimasterMetadataParse(sds meta, struct serverCommand *cmd) {
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
-    multimasterCommandHandler *handler = cmd->command_handler;
+    multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
     if (!handler) return C_ERR;
-    void *parsed = NULL;
-    if (handler->parse(meta, &parsed) != C_OK){
+    if (handler->parse(handler,meta) != C_OK){
         serverLog(LL_WARNING, "Unsupported metadata format: %s", meta ? meta : "(null)");
         return C_ERR;
     }
-    handler->parsed = parsed;
     return C_OK;
 }
 
@@ -1782,7 +1780,7 @@ static int rreplayMultimasterMetadataParse(sds meta, struct serverCommand *cmd) 
  * Calls the serialize function registered with the command handler of the executing command 
  * This function requires the executing command to have a handler struct associated with it */
 static robj *rreplayMultimasterMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
-    multimasterCommandHandler *handler = cmd->command_handler;
+    multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
     if (handler) return handler->serialize(cmd,argv,argc);
     return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
 }
@@ -2458,7 +2456,8 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
      * `processCommand()` will reject non-whitelisted writes before they reach here, 
      * but a commands can slip through through other paths (eg: alsoPropagate),
      * to be a 100% we perform a check on the RREPLAY as well. */
-    if (hashtableSize(server.multi_master_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
+    if (hashtableSize(server.multi_master_whitelist) > 0 && 
+        hashtableFind(server.multi_master_whitelist, payload_cmd->fullname, NULL) == 0) {
         serverLog(LL_WARNING, "Skipping RREPLAY for non-whitelisted command '%s'",
                   payload_cmd ? payload_cmd->fullname : (argv[0] ? (char *)objectGetVal(argv[0]) : "?"));
         return;
@@ -3688,7 +3687,8 @@ void rreplayCommand(client *c) {
     /* multimaster whitelist gate. 
      * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
      * Skip when the whitelist is empty. */
-    if (hashtableSize(server.multi_master_whitelist) > 0 && !isMultimasterWhitelistedCommand(payload_cmd)) {
+    if (hashtableSize(server.multi_master_whitelist) > 0 && 
+        hashtableFind(server.multi_master_whitelist, payload_cmd->fullname, NULL) == 0) {
         serverLog(LL_WARNING, "Skipping non-whitelisted RREPLAY command '%s'", payload_cmd->fullname);
         if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
         if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
@@ -3794,10 +3794,10 @@ void rreplayCommand(client *c) {
     exec_client->lastcmd = payload_cmd;
     exec_client->realcmd = payload_cmd;
     exec_client->slot = -1;
-
-    /* Keep AOF propagation behavior, but avoid direct command replication.
-     * The raw RREPLAY frame is forwarded through the replication stream path. */
-    call(exec_client, CMD_CALL_PROPAGATE_AOF);
+    
+    multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(payload_cmd);
+    if (handler && handler->resolve) handler->resolve(handler,exec_client);
+    else call(exec_client, CMD_CALL_PROPAGATE_AOF);
     hlcStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, hlc_ts, replay_tie_break);
     if (exec_client->flag.blocked) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: payload command '%s' blocked", payload_cmd->fullname);
