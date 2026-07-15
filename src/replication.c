@@ -3741,7 +3741,7 @@ void rreplayCommand(client *c) {
     robj **exec_payload_argv = NULL;
     int exec_payload_argc = 0;
 
-    if (payload_cmd->proc != hsetCommand){
+    if (payload_cmd->proc != hsetCommand && payload_cmd->proc != hincrbyCommand){
         if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
             exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
                                                         &exec_payload_argc);
