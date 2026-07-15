@@ -1778,7 +1778,7 @@ static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multima
     out->parsed = NULL;
     out->handler = NULL;
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
-    CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
+    CrdtCommandHandler *handler = cmd->command_handler;
     if (!handler) return C_ERR;
     void *parsed = NULL;
     if (handler->parse(meta, &parsed) != C_OK){
@@ -1796,7 +1796,7 @@ static int rreplayCrdtMetadataParse(sds meta, struct serverCommand *cmd, multima
  * Calls the serialize function registered with the command handler of the executing command 
  * This function requires the executing command to have a handler struct associated with it */
 static robj *rreplayCrdtMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
-    CrdtCommandHandler *handler = getCrdtCommandHandler(cmd);
+    CrdtCommandHandler *handler = cmd->command_handler;
     if (handler) return handler->serialize(cmd,argv,argc);
     return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
 }

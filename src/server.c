@@ -365,19 +365,19 @@ void exitFromChild(int retcode) {
  * lists, sets). */
 
 
-/* entryGetKey handler for multimasterWhitelistType */
-const void *whitelistGetEntry(const void *entry) {
-    const whitelistEntry *we = entry;
-    return (void *)we->name;
-}
+// /* entryGetKey handler for multimasterWhitelistType */
+// const void *whitelistGetEntry(const void *entry) {
+//     const whitelistEntry *we = entry;
+//     return (void *)we->name;
+// }
 
-/* entryDestructor handler for multimasterWhitelistType */
-void whitelistEntryDestructor(void *entry) {
-    whitelistEntry *we = entry;
-    if (we == NULL) return;
-    sdsfree(we->name);
-    zfree(we);
-}
+// /* entryDestructor handler for multimasterWhitelistType */
+// void whitelistEntryDestructor(void *entry) {
+//     whitelistEntry *we = entry;
+//     if (we == NULL) return;
+//     sdsfree(we->name);
+//     zfree(we);
+// }
 
 void dictVanillaFree(void *val) {
     zfree(val);
@@ -805,14 +805,14 @@ hashtableType kvstoreChannelHashtableType = {
     .getMetadataSize = kvstoreHashtableMetadataSize,
 };
 
-/* Multimaster command whitelist type. Keys are command names
- * values are pointers to whitelistEntry struct.  */
-hashtableType multimasterWhitelistType = {
-    .entryGetKey = whitelistGetEntry,
-    .hashFunction = dictSdsCaseHash,
-    .keyCompare = dictSdsKeyCaseCompare,
-    .entryDestructor = whitelistEntryDestructor,
-};
+// /* Multimaster command whitelist type. Keys are command names
+//  * values are pointers to whitelistEntry struct.  */
+// hashtableType multimasterWhitelistType = {
+//     .entryGetKey = whitelistGetEntry,
+//     .hashFunction = dictSdsCaseHash,
+//     .keyCompare = dictSdsKeyCaseCompare,
+//     .entryDestructor = whitelistEntryDestructor,
+// };
 
 /* Modules system dictionary type. Keys are module name,
  * values are pointer to ValkeyModule struct. */
@@ -2412,7 +2412,7 @@ void initServerConfig(void) {
     server.active_replica = 0;
     server.multi_master = 0;
     server.multi_master_no_forward = 0;
-    server.crdt_whitelist = hashtableCreate(&multimasterWhitelistType);
+    server.crdt_whitelist = hashtableCreate(&originalCommandSetType);
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
@@ -3643,19 +3643,14 @@ int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
 void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler) {
     void *entry = NULL;
     if (hashtableFind(server.crdt_whitelist, cmd_name, &entry)) {
-        whitelistEntry *we = entry;
-        we->handler = handler;
+        struct serverCommand *we = entry;
+        we->command_handler = handler;
     }
 }
 
-CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd) {
-    void *entry = NULL;
-    if (hashtableFind(server.crdt_whitelist, cmd->fullname, &entry)) {
-        whitelistEntry *we = entry;
-        return we->handler;
-    }
-    return NULL;
-}
+// CrdtCommandHandler *getCrdtCommandHandler(struct serverCommand *cmd) {
+//     return cmd->command_handler;
+// }
 
 static int shouldForwardToPrimaryViaRReplay(int target) {
     if (!(target & PROPAGATE_REPL)) return 0;
@@ -4025,8 +4020,9 @@ void call(client *c, int flags) {
             debug_argv_refcount[i] = c->original_argv ? c->original_argv[i]->refcount : c->argv[i]->refcount;
         }
     }
-
-    c->cmd->proc(c);
+    CrdtCommandHandler *handler = c->cmd->command_handler;
+    if (handler && handler->resolve) handler->resolve(handler->parsed,c);
+    else c->cmd->proc(c);
 
     if (c->flag.argv_borrowed && server.enable_debug_assert) {
         robj **argv = c->original_argv ? c->original_argv : c->argv;

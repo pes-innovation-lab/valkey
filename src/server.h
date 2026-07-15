@@ -463,10 +463,10 @@ typedef enum {
 #define REPLICA_CAPA_RREPLAY_PEER_STR "rreplay-peer"
 
 /* Current RREPLAY frame layout:
- *   RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <crdt-metadata> <command> [arg ...]
+ *   RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...]
  *     idx:      1            2        3          4           5             6       7+
  * (index 0 -> "RREPLAY" string itself). 
- * Additional Note: The CRDT metadata field is a RESP bulk string carrying per-CRDT data, or the sentinel "none". */
+ * Additional Note: The metadata field is a RESP bulk string carrying per-CRDT data, or the sentinel "none". */
 #define RREPLAY_META_IDX 5
 #define RREPLAY_CMD_START_IDX 6
 #define RREPLAY_META_NONE "none"
@@ -2487,21 +2487,20 @@ struct valkeyServer {
 
 /* Multimaster Command handler */
 typedef int (*crdtMetadataParseFn)(sds raw, void **parsed);
-typedef void (*crdtMetadataFreeFn)(void *parsed);
 typedef robj *(*crdtMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);
-typedef int (*crdtConflictResolveFn)(void *local_meta, void *remote_meta, void **result);
+typedef void *(*crdtConflictResolveFn)(void *metadata, client *c);
 
 typedef struct {
     crdtMetadataParseFn parse;
-    crdtMetadataFreeFn free;
     crdtMetadataSerializeFn serialize;
     crdtConflictResolveFn resolve;
+    void *parsed;
 } CrdtCommandHandler;
 
-typedef struct{
-    sds name;
-    CrdtCommandHandler *handler;
-} whitelistEntry;
+// typedef struct{
+//     sds name;
+//     CrdtCommandHandler *handler;
+// } whitelistEntry;
 
 #define MAX_KEYS_BUFFER 256
 
@@ -2837,6 +2836,8 @@ struct serverCommand {
     struct serverCommand *parent;
     struct ValkeyModuleCommand *module_cmd; /* A pointer to the module command data (NULL if native command) */
     sds info_cache[RESP_CACHE_INDEX_MAX];   /* Cached COMMAND INFO response: [0]=RESP2, [1]=RESP3 */
+
+    CrdtCommandHandler *command_handler;
 };
 
 struct serverError {

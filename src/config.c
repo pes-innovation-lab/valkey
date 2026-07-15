@@ -3011,15 +3011,7 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
      * we free this duplicate string to prevent memory leaks. */
     for (j = 0; j < argc; j++) {
         struct serverCommand *cmd = lookupCommandBySds(argv[j]);
-        if (!cmd)
-            continue;
-        whitelistEntry *we = zmalloc(sizeof(whitelistEntry));
-        we->name = sdsdup(cmd->fullname);
-        we->handler = NULL;
-        if (!hashtableAdd(server.crdt_whitelist, we)) {
-            sdsfree(we->name);
-            zfree(we);
-        }
+        hashtableAdd(server.crdt_whitelist, cmd);
     }
 
     return 1;
@@ -3034,10 +3026,10 @@ static sds getConfigMultimasterWhitelistOption(standardConfig *config) {
     int first = 1;
     void *entry = NULL;
     while (hashtableNext(di, &entry)) {
-        whitelistEntry *we = entry;
+        struct serverCommand *we = entry;
         if (!first) buf = sdscatlen(buf, " ", 1);
 
-        buf = sdscatsds(buf, we->name);
+        buf = sdscatsds(buf, we->fullname);
         first = 0;
     }
     hashtableReleaseIterator(di);
