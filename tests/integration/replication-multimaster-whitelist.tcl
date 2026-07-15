@@ -79,6 +79,38 @@ start_server {tags {"repl external:skip"}} {
             $node0 config set multi-master-whitelist ""
         }
 
+        test {Actual round-trip SET operation replicates between peers} {
+            $node0 del mm:wl:set:rt
+            $node1 del mm:wl:set:rt
+            # Allow wait for del propagation if needed, or just rely on unique key
+            
+            $node0 config set multi-master-whitelist "set"
+            $node1 config set multi-master-whitelist "set"
+            
+            # Write to node0, replicate to node1
+            assert_equal OK [$node0 set mm:wl:set:rt from_node0]
+            assert_equal {from_node0} [$node0 get mm:wl:set:rt]
+            
+            wait_for_condition 100 100 {
+                [$node1 get mm:wl:set:rt] eq {from_node0}
+            } else {
+                fail "whitelisted SET did not replicate to node1"
+            }
+            
+            # Write to node1, replicate to node0
+            assert_equal OK [$node1 set mm:wl:set:rt from_node1]
+            assert_equal {from_node1} [$node1 get mm:wl:set:rt]
+            
+            wait_for_condition 100 100 {
+                [$node0 get mm:wl:set:rt] eq {from_node1}
+            } else {
+                fail "whitelisted SET did not replicate to node0"
+            }
+            
+            $node0 config set multi-master-whitelist ""
+            $node1 config set multi-master-whitelist ""
+        }
+
         test {Non-none CRDT metadata is rejected gracefully} {
             $node0 del mm:meta:bad
             $node0 config set multi-master-whitelist "set"
