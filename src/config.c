@@ -1449,9 +1449,9 @@ void rewriteConfigSaveOption(standardConfig *config, const char *name, struct re
 void rewriteConfigMultimasterWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
     UNUSED(config);
 
-    if (hashtableSize(server.crdt_whitelist)) {
+    if (hashtableSize(server.multi_master_whitelist)) {
         sds line = sdsnew(name);
-        dictIterator *di = hashtableCreateIterator(server.crdt_whitelist, 0);
+        dictIterator *di = hashtableCreateIterator(server.multi_master_whitelist, 0);
         void *entry = NULL;
         while (hashtableNext(di, &entry)) {
             line = sdscatfmt(line, " %S", (sds)entry);
@@ -3004,25 +3004,25 @@ static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv
         }
     }
 
-    if (!reading_config_file) hashtableEmpty(server.crdt_whitelist, NULL);
+    if (!reading_config_file) hashtableEmpty(server.multi_master_whitelist, NULL);
 
     /* Add the validated commands to the whitelist;
      * If a command is already in the dict, 
      * we free this duplicate string to prevent memory leaks. */
     for (j = 0; j < argc; j++) {
         struct serverCommand *cmd = lookupCommandBySds(argv[j]);
-        hashtableAdd(server.crdt_whitelist, cmd);
+        hashtableAdd(server.multi_master_whitelist, cmd);
     }
 
     return 1;
 }
 
-/* Convert the server.crdt_whitelist dict to a string,
+/* Convert the server.multi_master_whitelist dict to a string,
  * so it's human readable and is returned on a `CONFIG GET`  */
 static sds getConfigMultimasterWhitelistOption(standardConfig *config) {
     UNUSED(config);
     sds buf = sdsempty();
-    dictIterator *di = hashtableCreateIterator(server.crdt_whitelist, 0);
+    dictIterator *di = hashtableCreateIterator(server.multi_master_whitelist, 0);
     int first = 1;
     void *entry = NULL;
     while (hashtableNext(di, &entry)) {

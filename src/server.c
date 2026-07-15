@@ -2397,7 +2397,7 @@ void initServerConfig(void) {
     server.active_replica = 0;
     server.multi_master = 0;
     server.multi_master_no_forward = 0;
-    server.crdt_whitelist = hashtableCreate(&originalCommandSetType);
+    server.multi_master_whitelist = hashtableCreate(&originalCommandSetType);
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
@@ -3622,12 +3622,12 @@ bool clientSupportStandAloneRedirect(client *c) {
 int isMultimasterWhitelistedCommand(struct serverCommand *cmd) {
     if (cmd == NULL) return 0;
     void *entry = NULL;
-    return hashtableFind(server.crdt_whitelist, cmd->fullname, &entry);
+    return hashtableFind(server.multi_master_whitelist, cmd->fullname, &entry);
 }
 
-void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler) {
+void registerMultimasterCommandHandler(sds cmd_name, multimasterCommandHandler *handler) {
     void *entry = NULL;
-    if (hashtableFind(server.crdt_whitelist, cmd_name, &entry)) {
+    if (hashtableFind(server.multi_master_whitelist, cmd_name, &entry)) {
         struct serverCommand *we = entry;
         we->command_handler = handler;
     }
@@ -4001,7 +4001,7 @@ void call(client *c, int flags) {
             debug_argv_refcount[i] = c->original_argv ? c->original_argv[i]->refcount : c->argv[i]->refcount;
         }
     }
-    CrdtCommandHandler *handler = c->cmd->command_handler;
+    multimasterCommandHandler *handler = c->cmd->command_handler;
     if (handler && handler->resolve) handler->resolve(handler->parsed,c);
     else c->cmd->proc(c);
 
@@ -4524,7 +4524,7 @@ int processCommand(client *c) {
      * - command arrives from replication link / fake client,
      * - whitelist is empty. */
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
-        hashtableSize(server.crdt_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
+        hashtableSize(server.multi_master_whitelist) > 0 && !isMultimasterWhitelistedCommand(c->cmd)) {
         rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         serverLog(LL_WARNING, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;

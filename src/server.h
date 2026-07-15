@@ -2234,7 +2234,7 @@ struct valkeyServer {
     int active_replica;   /* If enabled, this node may accept writes while being a replica. */
     int multi_master;     /* If enabled, allow multiple configured upstreams (scaffold). */
     int multi_master_no_forward; /* If enabled, avoid forwarding replay traffic (scaffold). */
-    hashtable *crdt_whitelist; /* Dictionary containing CRDT-allowed commands for multi-master mode. */
+    hashtable *multi_master_whitelist; /* Dictionary containing commands allowed in multi-master mode. */
     dict *rreplay_seen;   /* Recent replay frames for dedupe. Key: "<origin-uuid>:<replay-id>" */
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
@@ -2486,21 +2486,16 @@ struct valkeyServer {
 
 
 /* Multimaster Command handler */
-typedef int (*crdtMetadataParseFn)(sds raw, void **parsed);
-typedef robj *(*crdtMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);
-typedef void *(*crdtConflictResolveFn)(void *metadata, client *c);
+typedef int (*multimasterMetadataParseFn)(sds raw, void **parsed);
+typedef robj *(*multimasterMetadataSerializeFn)(struct serverCommand *cmd, robj **argv, int argc);
+typedef void *(*multimasterConflictResolveFn)(void *metadata, client *c);
 
 typedef struct {
-    crdtMetadataParseFn parse;
-    crdtMetadataSerializeFn serialize;
-    crdtConflictResolveFn resolve;
+    multimasterMetadataParseFn parse;
+    multimasterMetadataSerializeFn serialize;
+    multimasterConflictResolveFn resolve;
     void *parsed;
-} CrdtCommandHandler;
-
-// typedef struct{
-//     sds name;
-//     CrdtCommandHandler *handler;
-// } whitelistEntry;
+} multimasterCommandHandler;
 
 #define MAX_KEYS_BUFFER 256
 
@@ -2837,7 +2832,7 @@ struct serverCommand {
     struct ValkeyModuleCommand *module_cmd; /* A pointer to the module command data (NULL if native command) */
     sds info_cache[RESP_CACHE_INDEX_MAX];   /* Cached COMMAND INFO response: [0]=RESP2, [1]=RESP3 */
 
-    CrdtCommandHandler *command_handler;
+    multimasterCommandHandler *command_handler;
 };
 
 struct serverError {
@@ -3373,7 +3368,7 @@ sds replicationSendAuth(connection *conn);
 sds receiveSynchronousResponse(connection *conn);
 ConnectionType *connTypeOfReplication(void);
 robj *generateSelectCommand(int dictid);
-void registerCrdtCommandHandler(sds cmd_name, CrdtCommandHandler *handler);
+void registerMultimasterCommandHandler(sds cmd_name, multimasterCommandHandler *handler);
 
 /* Generic persistence functions */
 void startLoadingFile(size_t size, char *filename, int rdbflags);
