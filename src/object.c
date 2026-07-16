@@ -38,6 +38,7 @@
 #include "zmalloc.h"
 #include "sds.h"
 #include "module.h"
+#include "bwrga.h"
 #include <math.h>
 #include <ctype.h>
 
@@ -138,6 +139,14 @@ robj *makeObjectShared(robj *o) {
  * string object where o->ptr points to a proper sds string. */
 robj *createRawStringObject(const char *ptr, size_t len) {
     return createObject(OBJ_STRING, sdsnewlen(ptr, len));
+}
+
+/* Create a string object with encoding OBJ_ENCODING_BWRGA, wrapping a
+ * bwrga_t* CRDT structure. The value is never embedded, same as RAW. */
+robj *createBwrgaObject(bwrga_t *b) {
+    robj *o = createObject(OBJ_STRING, b);
+    o->encoding = OBJ_ENCODING_BWRGA;
+    return o;
 }
 
 /* Get beginning of embedded data, which may contain expire, key, and/or value. Embedded data flags must be accurate when called. */
@@ -474,6 +483,14 @@ robj *dupStringObject(const robj *o) {
         d->encoding = OBJ_ENCODING_INT;
         d->val_ptr = o->val_ptr;
         return d;
+    case OBJ_ENCODING_BWRGA: {
+        /* bwrgaMerge into a fresh, empty structure reconstructs every
+         * fragment (live or tombstoned) faithfully -- a real independent
+         * copy of the full CRDT history, not just the visible content. */
+        bwrga_t *dup = bwrgaNew();
+        bwrgaMerge(dup, objectGetVal(o));
+        return createBwrgaObject(dup);
+    }
     default: serverPanic("Wrong encoding."); break;
     }
 }
@@ -555,6 +572,8 @@ robj *createModuleObject(moduleType *mt, void *value) {
 void freeStringObject(robj *o) {
     if (o->encoding == OBJ_ENCODING_RAW) {
         sdsfree(objectGetVal(o));
+    } else if (o->encoding == OBJ_ENCODING_BWRGA) {
+        bwrgaFree(objectGetVal(o));
     }
 }
 
@@ -1179,6 +1198,7 @@ char *strEncoding(int encoding) {
     case OBJ_ENCODING_SKIPLIST: return "skiplist";
     case OBJ_ENCODING_EMBSTR: return "embstr";
     case OBJ_ENCODING_STREAM: return "stream";
+    case OBJ_ENCODING_BWRGA: return "bwrga";
     default: return "unknown";
     }
 }
@@ -1198,6 +1218,38 @@ size_t objectComputeSize(robj *key, robj *o, size_t sample_size, int dbid) {
     if (o->type == OBJ_STRING) {
         if (o->encoding == OBJ_ENCODING_RAW) {
             asize += sdsAllocSize(objectGetVal(o));
+        } else if (o->encoding == OBJ_ENCODING_BWRGA) {
+            bwrga_t *b = objectGetVal(o);
+            asize += sizeof(bwrga_t);
+            asize += hashtableMemUsage(b->base_table);
+
+            /* Unlike a hashtable/quicklist, this chain has no O(1) total
+             * fragment count to extrapolate against, so sample_size only
+             * bounds the detailed per-fragment work; if the structure is
+             * bigger than the sample, the remainder is a cheap count-only
+             * continuation of the same walk (no per-node size work) so we
+             * can still extrapolate without a second full pass. */
+            rga_block_t *node = b->head;
+            while (node != NULL && samples < sample_size) {
+                elesize += sizeof(rga_block_t);
+                if (node->content) elesize += node->length + 1;
+                if (node->identifier.origin) elesize += sdsAllocSize(node->identifier.origin);
+                if (node->del_uid.origin) elesize += sdsAllocSize(node->del_uid.origin);
+                if (node->parent_id.origin) elesize += sdsAllocSize(node->parent_id.origin);
+                samples++;
+                node = node->nextLink;
+            }
+            if (node == NULL) {
+                /* Walked the whole chain within the sample cap -- exact. */
+                asize += elesize;
+            } else if (samples) {
+                size_t total = samples;
+                while (node != NULL) {
+                    total++;
+                    node = node->nextLink;
+                }
+                asize += (double)elesize / samples * total;
+            }
         } else if (o->encoding != OBJ_ENCODING_INT && o->encoding != OBJ_ENCODING_EMBSTR) {
             serverPanic("Unknown string encoding");
         }

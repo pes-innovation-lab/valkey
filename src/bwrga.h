@@ -48,6 +48,10 @@ typedef struct bwrga {
 bwrga_t *bwrgaNew(void);
 void bwrgaFree(bwrga_t *bwrga);
 
+/* Wraps b in a string robj with encoding OBJ_ENCODING_BWRGA. Declared here
+ * (not server.h) since any caller needs bwrga_t already, hence this header. */
+robj *createBwrgaObject(bwrga_t *b);
+
 /* Helper ID allocation and comparison functions */
 rga_id_t rgaIdNew(hlc ts, const char *origin);
 void rgaIdFree(rga_id_t *id);
