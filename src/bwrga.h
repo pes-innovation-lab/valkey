@@ -64,4 +64,11 @@ rga_block_t *split_at(bwrga_t *b, rga_block_t *node, uint32_t local_pos);
 void apply_rga_delete(bwrga_t *b, rga_id_t identifier, uint32_t del_offset, uint32_t del_length, rga_id_t del_uid);
 void apply_rga_insert(bwrga_t *b, rga_id_t new_id, const char *content, uint32_t length, rga_id_t predecessor, uint32_t pred_offset);
 
+/* Reconstructs an ARBITRARY fragment (any offset, any tombstone state)*/
+void apply_rga_insert_fragment(bwrga_t *b, rga_id_t identifier, uint32_t offset,
+                                const char *content, uint32_t length,
+                                int is_tombstone, rga_id_t del_uid,
+                                rga_id_t predecessor, uint32_t pred_offset);
+
+                                
 #endif

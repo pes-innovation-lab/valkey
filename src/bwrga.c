@@ -376,3 +376,105 @@ void apply_rga_insert(bwrga_t *b, rga_id_t new_id, const char *content, uint32_t
     }
 }
 
+
+/* Reconstructs an arbitrary fragment (any offset, any tombstone state) of a
+ * possibly-already-known identity into b , used only by bwrgaMerge. */
+void apply_rga_insert_fragment(bwrga_t *b, rga_id_t identifier, uint32_t offset,
+                                const char *content, uint32_t length,
+                                int is_tombstone, rga_id_t del_uid,
+                                rga_id_t predecessor, uint32_t pred_offset) {
+    rga_block_t *new_node = zmalloc(sizeof(rga_block_t));
+    new_node->identifier.ts = identifier.ts;
+    new_node->identifier.origin = identifier.origin ? sdsdup(identifier.origin) : NULL;
+    new_node->offset = offset;
+    new_node->length = length;
+    new_node->is_tombstone = is_tombstone;
+
+    if (is_tombstone) {
+        new_node->content = NULL;
+        new_node->del_uid.ts = del_uid.ts;
+        new_node->del_uid.origin = del_uid.origin ? sdsdup(del_uid.origin) : NULL;
+    } else {
+        new_node->content = zmalloc(length + 1);
+        memcpy(new_node->content, content, length);
+        new_node->content[length] = '\0';
+        new_node->del_uid.ts.wall_time = 0;
+        new_node->del_uid.ts.logical = 0;
+        new_node->del_uid.origin = NULL;
+    }
+
+    new_node->parent_id.ts = predecessor.ts;
+    new_node->parent_id.origin = predecessor.origin ? sdsdup(predecessor.origin) : NULL;
+    new_node->parent_offset = pred_offset;
+    new_node->nextLink = NULL;
+    new_node->splitLink = NULL;
+
+    /* Register only if this identity is new to b; otherwise splice into the
+     * existing splitLink lineage (sorted by offset) so find_offset keeps
+     * walking across every fragment of this identity. */
+    rga_block_t *existing_base = NULL;
+    hashtableFind(b->base_table, &new_node->identifier, (void **)&existing_base);
+    if (existing_base == NULL) {
+        hashtableAdd(b->base_table, new_node);
+    } else {
+        rga_block_t *prev = existing_base;
+        while (prev->splitLink != NULL && prev->splitLink->offset < new_node->offset) {
+            prev = prev->splitLink;
+        }
+        new_node->splitLink = prev->splitLink;
+        prev->splitLink = new_node;
+    }
+
+    /* Same predecessor resolution, sibling-ordering, and survival-check
+     * logic as apply_rga_insert. */
+    rga_block_t *pred_node = NULL;
+    int pred_found = 0;
+    int is_head = (predecessor.ts.wall_time == 0 && predecessor.ts.logical == 0 && predecessor.origin == NULL);
+
+    if (!is_head) {
+        pred_node = find_offset(b, predecessor, pred_offset);
+        if (pred_node != NULL) {
+            pred_found = 1;
+            uint32_t local_pos = pred_offset - pred_node->offset + 1;
+            if (local_pos < pred_node->length) {
+                split_at(b, pred_node, local_pos);
+            }
+        }
+    }
+
+    if (pred_found && pred_node->is_tombstone && !new_node->is_tombstone) {
+        if (hlcCompare(&new_node->identifier.ts, &pred_node->del_uid.ts) <= 0) {
+            new_node->is_tombstone = 1;
+            if (new_node->content) {
+                zfree(new_node->content);
+                new_node->content = NULL;
+            }
+            new_node->del_uid.ts = pred_node->del_uid.ts;
+            new_node->del_uid.origin = pred_node->del_uid.origin ? sdsdup(pred_node->del_uid.origin) : NULL;
+        }
+    }
+
+    // Block placement algorith 
+
+    rga_block_t *prev = pred_node;
+    rga_block_t *cur = (pred_node == NULL) ? b->head : pred_node->nextLink;
+
+    while (cur != NULL) {
+        rga_block_t *direct_child = find_direct_child_ancestor(b, cur, pred_node);
+        if (direct_child == NULL) break; /* cur falls outside pred_node's subtree entirely */
+        if (direct_child == cur && rgaIdCompare(&cur->identifier, &new_node->identifier) <= 0) {
+            break; /* cur is a direct sibling that sorts after new_node */
+        }
+        prev = cur;
+        cur = cur->nextLink;
+    }
+
+    if (prev == NULL) {
+        new_node->nextLink = b->head;
+        b->head = new_node;
+    } else {
+        new_node->nextLink = prev->nextLink;
+        prev->nextLink = new_node;
+    }
+}
+
