@@ -478,3 +478,46 @@ void apply_rga_insert_fragment(bwrga_t *b, rga_id_t identifier, uint32_t offset,
     }
 }
 
+
+/* Conflict-free Replication Merge */
+
+void bwrgaMerge(bwrga_t *dest, bwrga_t *src) {
+    if (dest == NULL || src == NULL) return;
+
+    rga_block_t *cur = src->head;
+    while (cur != NULL) {
+        /* Check fragment-level coverage, not just identity presence , one
+         * identifier can have multiple fragments with different offsets and
+         * tombstone states once split. */
+        rga_block_t *dest_block = find_offset(dest, cur->identifier, cur->offset);
+
+        if (dest_block == NULL) {
+            /* No coverage at all here , reconstruct it */
+            apply_rga_insert_fragment(dest, cur->identifier, cur->offset,
+                                       cur->content, cur->length,
+                                       cur->is_tombstone, cur->del_uid,
+                                       cur->parent_id, cur->parent_offset);
+        } else if (cur->is_tombstone) {
+            /* Some coverage already exists (maybe split differently) ,
+             * apply_rga_delete self-aligns and reconciles del_uid to the
+             * more recent side. */
+            apply_rga_delete(dest, cur->identifier, cur->offset, cur->length, cur->del_uid);
+        }
+        cur = cur->nextLink;
+    }
+}
+
+/* Materialize Document */
+
+sds bwrgaMaterialize(bwrga_t *b) {
+    sds s = sdsempty();
+    if (b == NULL) return s;
+    rga_block_t *cur = b->head;
+    while (cur != NULL) {
+        if (!cur->is_tombstone && cur->content != NULL) {
+            s = sdscatlen(s, cur->content, cur->length);
+        }
+        cur = cur->nextLink;
+    }
+    return s;
+}

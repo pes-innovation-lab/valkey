@@ -70,5 +70,11 @@ void apply_rga_insert_fragment(bwrga_t *b, rga_id_t identifier, uint32_t offset,
                                 int is_tombstone, rga_id_t del_uid,
                                 rga_id_t predecessor, uint32_t pred_offset);
 
-                                
+/* call in both directions for full reconciliation between two replicas) */
+void bwrgaMerge(bwrga_t *dest, bwrga_t *src);
+
+/* Materializes the linked list of live blocks into a contiguous SDS string */
+sds bwrgaMaterialize(bwrga_t *b);
+
+
 #endif
