@@ -4517,8 +4517,7 @@ int processCommand(client *c) {
      * - command arrives from replication link / fake client,
      * - whitelist is empty. */
     if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
-        hashtableSize(server.multi_master_whitelist) > 0 && 
-        hashtableFind(server.multi_master_whitelist, c->cmd->fullname, NULL) == 0) {
+        hashtableSize(server.multi_master_whitelist) > 0 && !getMultimasterWhitelistedHandler(c->cmd)) {
         rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         serverLog(LL_WARNING, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
         return C_OK;

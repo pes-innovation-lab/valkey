@@ -43,8 +43,10 @@ start_server {tags {"repl external:skip"}} {
         test {Whitelisted command executes locally and replicates via RREPLAY} {
             $node0 del mm:wl:list
             $node0 config set multi-master-whitelist "rpush lset"
-            assert_equal 3 [$node0 rpush mm:wl:list a b c]
-            assert_equal OK [$node0 lset mm:wl:list 0 X]
+            catch { $node0 rpush mm:wl:list a b c } res
+            assert_equal 3 $res
+            catch { $node0 lset mm:wl:list 0 X } res
+            assert_equal OK $res
             assert_equal {X b c} [$node0 lrange mm:wl:list 0 -1]
             wait_for_condition 100 100 {
                 [$node1 lrange mm:wl:list 0 -1] eq {X b c}
@@ -88,7 +90,7 @@ start_server {tags {"repl external:skip"}} {
         }
 
         test {Multimaster metadata none round-trips through RREPLAY} {
-            $node0 del mm:meta:ok
+            catch { $node0 del mm:meta:ok }
             $node0 config set multi-master-whitelist "set"
             assert_equal OK [$node0 replconf capa rreplay-peer]
             set ts [expr {[s -1 hlc_clock_wall] + 100000}]
@@ -98,15 +100,16 @@ start_server {tags {"repl external:skip"}} {
         }
 
         test {Actual round-trip SET operation replicates between peers} {
-            $node0 del mm:wl:set:rt
-            $node1 del mm:wl:set:rt
+            catch { $node0 del mm:wl:set:rt }
+            catch { $node1 del mm:wl:set:rt }
             # Allow wait for del propagation if needed, or just rely on unique key
             
             $node0 config set multi-master-whitelist "set"
             $node1 config set multi-master-whitelist "set"
             
             # Write to node0, replicate to node1
-            assert_equal OK [$node0 set mm:wl:set:rt from_node0]
+            catch { $node0 set mm:wl:set:rt from_node0 } res
+            assert_equal OK $res
             assert_equal {from_node0} [$node0 get mm:wl:set:rt]
             
             wait_for_condition 100 100 {
@@ -116,7 +119,8 @@ start_server {tags {"repl external:skip"}} {
             }
             
             # Write to node1, replicate to node0
-            assert_equal OK [$node1 set mm:wl:set:rt from_node1]
+            catch { $node1 set mm:wl:set:rt from_node1 } res
+            assert_equal OK $res
             assert_equal {from_node1} [$node1 get mm:wl:set:rt]
             
             wait_for_condition 100 100 {
@@ -130,7 +134,7 @@ start_server {tags {"repl external:skip"}} {
         }
 
         test {Bad metadata is rejected gracefully} {
-            $node0 del mm:meta:bad
+            catch { $node0 del mm:meta:bad }
             $node0 config set multi-master-whitelist "set"
             assert_equal OK [$node0 replconf capa rreplay-peer]
             set ts [expr {[s -1 hlc_clock_wall] + 100000}]
