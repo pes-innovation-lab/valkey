@@ -1781,7 +1781,7 @@ static int rreplayMultimasterMetadataParse(sds meta, struct serverCommand *cmd) 
  * This function requires the executing command to have a handler struct associated with it */
 static robj *rreplayMultimasterMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
     multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
-    if (handler) return handler->serialize(cmd,argv,argc);
+    if (handler) return handler->serialize(handler,cmd,argv,argc);
     return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
 }
 

@@ -2484,11 +2484,11 @@ struct valkeyServer {
     char *debug_context; /* A free-form string that has no impact on server except being included in a crash report. */
 };
 
-typedef struct multimasterCommandHandler_t multimasterCommandHandler;
+typedef struct multimasterCommandHandler multimasterCommandHandler;
 
-struct multimasterCommandHandler_t{
-    int (*parse)(multimasterCommandHandler *self,sds raw);
-    robj *(*serialize)(struct serverCommand *cmd, robj **argv, int argc);
+struct multimasterCommandHandler{
+    int (*parse)(multimasterCommandHandler *self, sds raw);
+    robj *(*serialize)(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc);
     void (*resolve)(multimasterCommandHandler *self, client *c);
 };
 
