@@ -59,4 +59,9 @@ rga_block_t *find_offset(bwrga_t *b, rga_id_t identifier, uint32_t target_offset
 int find_predecessor(bwrga_t *b, uint32_t target_pos, rga_id_t *out_id, uint32_t *out_offset);
 int find_delete_start(bwrga_t *b, uint32_t target_pos, rga_id_t *out_id, uint32_t *out_offset);
 
+/* Core mutations */
+rga_block_t *split_at(bwrga_t *b, rga_block_t *node, uint32_t local_pos);
+void apply_rga_delete(bwrga_t *b, rga_id_t identifier, uint32_t del_offset, uint32_t del_length, rga_id_t del_uid);
+void apply_rga_insert(bwrga_t *b, rga_id_t new_id, const char *content, uint32_t length, rga_id_t predecessor, uint32_t pred_offset);
+
 #endif
