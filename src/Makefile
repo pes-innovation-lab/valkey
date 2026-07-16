@@ -480,6 +480,7 @@ ENGINE_SERVER_OBJ = \
     bio.o \
     bitops.o \
     blocked.o \
+    bwrga.o \
     call_reply.o \
     childinfo.o \
     cluster.o \
