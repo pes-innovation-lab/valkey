@@ -54,5 +54,9 @@ void rgaIdFree(rga_id_t *id);
 rga_id_t rgaIdDup(const rga_id_t *id);
 int rgaIdCompare(const rga_id_t *a, const rga_id_t *b);
 
+/* Lookup functions */
+rga_block_t *find_offset(bwrga_t *b, rga_id_t identifier, uint32_t target_offset);
+int find_predecessor(bwrga_t *b, uint32_t target_pos, rga_id_t *out_id, uint32_t *out_offset);
+int find_delete_start(bwrga_t *b, uint32_t target_pos, rga_id_t *out_id, uint32_t *out_offset);
 
 #endif
