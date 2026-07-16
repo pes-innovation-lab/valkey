@@ -45,5 +45,14 @@ typedef struct bwrga {
                               * separate heap-allocated key is needed (see rgaBlockGetIdentifier). */
 } bwrga_t;
 
+bwrga_t *bwrgaNew(void);
+void bwrgaFree(bwrga_t *bwrga);
+
+/* Helper ID allocation and comparison functions */
+rga_id_t rgaIdNew(hlc ts, const char *origin);
+void rgaIdFree(rga_id_t *id);
+rga_id_t rgaIdDup(const rga_id_t *id);
+int rgaIdCompare(const rga_id_t *a, const rga_id_t *b);
+
 
 #endif
