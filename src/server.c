@@ -52,6 +52,7 @@
 #include "module.h"
 #include "scripting_engine.h"
 #include "util.h"
+#include "hash_crdt.h"
 
 #include "eval.h"
 
@@ -8021,6 +8022,18 @@ __attribute__((weak)) int main(int argc, char **argv) {
     }
 
     initServer();
+    multimasterCommandHandler *hsetHandler = zmalloc(sizeof(multimasterCommandHandler));
+    hsetHandler->parse = hsetParse;
+    hsetHandler->serialize = hsetSerialize;
+    hsetHandler->resolve = hsetResolve;
+    registerMultimasterCommandHandler(sdsnew("hset"), hsetHandler);
+
+    multimasterCommandHandler *hincrbyHandler = zmalloc(sizeof(multimasterCommandHandler));
+    hincrbyHandler->parse = hincrbyParse;
+    hincrbyHandler->serialize = hincrbySerialize;
+    hincrbyHandler->resolve = hincrbyResolve;
+    registerMultimasterCommandHandler(sdsnew("hincrby"), hincrbyHandler);
+
     if (background || server.pidfile) createPidFile();
     if (server.set_proc_title) serverSetProcTitle(NULL);
     serverAsciiArt();

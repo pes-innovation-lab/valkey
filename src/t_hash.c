@@ -948,41 +948,6 @@ void hincrbyCommand(client *c) {
     }
 
 
-    /* it looks like hincrby is being canonicalized so these changes wont work as intended */
-
-    sds top_level_key = objectGetVal(c->argv[1]);
-    sds hashkey = sdscatfmt(sdsempty(),"%S:%S",top_level_key,objectGetVal(c->argv[2]));
-    /* indexes the crdt dictionary to find the respective crdt struct. */
-    hash_key_field *hashcrdt = dictFetchValue(server.hash_crdt_metadata,hashkey);
-    hlc *current_hlc = server.current_rreplay_hlc;
-    if (!current_hlc){
-        current_hlc = &server.hlc_clock;
-    }
-    sds origin_uuid = server.incoming_uuid;
-    if(!origin_uuid){
-        origin_uuid = sdsnew(server.runid);
-    }
-    uint16_t target_peer_id = getPeerId(origin_uuid);
-    peer_value *target_peer = findPeerByPeerId(hashcrdt,target_peer_id);
-    if(!target_peer){
-        target_peer = createNewPeer(target_peer_id);
-        listAddNodeTail(hashcrdt->list_of_peers,target_peer);
-    }
-
-    if(incr>=0)
-    target_peer->p_val+=incr;
-    else
-    target_peer->n_val+=incr;
-
-    target_peer->hlc_timestamp.logical = current_hlc->logical;
-    target_peer->hlc_timestamp.wall_time = current_hlc->wall_time;
-
-    if(origin_uuid != server.incoming_uuid)
-    sdsfree(origin_uuid);
-
-
-
-    //new = evaluateHashKey(hashcrdt);
     new = sdsfromlonglong(value+incr);
     string2ll(new,sdslen(new),&value);
     bool has_volatile_fields = hashTypeHasVolatileFields(o);
@@ -1327,47 +1292,9 @@ void hsetCommand(client *c) {
     hashTypeTryConversion(o, c->argv, 2, c->argc - 1);
     bool has_volatile_fields = hashTypeHasVolatileFields(o);
     int expired_overwritten = 0;
-    /* store the top level key for creating a subkey level hash */
-    sds top_level_key = objectGetVal(c->argv[1]);
     for (i = 2; i < c->argc; i += 2) {
         bool expired = false;
-        /* creates a unique key:subkey string to index into the crdt dictionary*/
-        sds hashkey = sdscatfmt(sdsempty(),"%S:%S",top_level_key,objectGetVal(c->argv[i]));
-        /* indexes the crdt dictionary to find the respective crdt struct. initializes a fresh struct if not found */
-        hash_key_field *hashcrdt = dictFetchValue(server.hash_crdt_metadata,hashkey);
-        hlc *current_hlc = server.current_rreplay_hlc;
-        if (!current_hlc){
-            current_hlc = &server.hlc_clock;
-        }
-        if (hashcrdt){
-
-            if (hlcCompare(current_hlc,&hashcrdt->reset_hlc)>=0){
-                hashcrdt->reset_hlc.wall_time = current_hlc->wall_time;
-                hashcrdt->reset_hlc.logical = current_hlc->logical;
-                sdsfree(hashcrdt->base_val);
-                hashcrdt->base_val = sdsdup(objectGetVal(c->argv[i+1]));
-                
-            }
-            else{
-                continue;
-            }
-        }
-        else{
-            hashcrdt = zmalloc(sizeof(hash_key_field));
-            // sds origin_uuid = c->repl_data->replica_uuid;
-            // uint16_t *peerid = dictFetchValue(server.peer_registry,origin_uuid);
-            // if (!peerid){
-            //     *peerid = server.next_peer_id++;
-            //     dictAdd(server.peer_registry,sdsdup(origin_uuid),(void*)peerid);
-            // }
-            initializeHashKeyField(hashcrdt,current_hlc,objectGetVal(c->argv[i+1]));
-            dictAdd(server.hash_crdt_metadata,hashkey,hashcrdt);
-        }
-
-        sds value_to_write = evaluateHashKey(hashcrdt);
-        created += !hashTypeSet(o, objectGetVal(c->argv[i]), value_to_write, EXPIRY_NONE, HASH_SET_COPY, &expired);
-        /* NOTE - We do not need to track all expired items which are overitten in order to propagate them, since the replica will surely just override them
-         * we just need to remember that we had such items to report the keyspace notification and update the stats */
+        created += !hashTypeSet(o, objectGetVal(c->argv[i]), objectGetVal(c->argv[i + 1]), EXPIRY_NONE, HASH_SET_COPY, &expired);
         if (expired) expired_overwritten++;
     }
     if (has_volatile_fields != hashTypeHasVolatileFields(o)) {

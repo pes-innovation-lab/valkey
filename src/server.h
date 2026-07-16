@@ -2502,14 +2502,6 @@ struct multimasterCommandHandler{
     void (*resolve)(multimasterCommandHandler *self, client *c);
 };
 
-typedef struct multimasterCommandHandler multimasterCommandHandler;
-
-struct multimasterCommandHandler{
-    int (*parse)(multimasterCommandHandler *self, sds raw);
-    robj *(*serialize)(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc);
-    void (*resolve)(multimasterCommandHandler *self, client *c);
-};
-
 #define MAX_KEYS_BUFFER 256
 
 typedef struct {

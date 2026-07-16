@@ -3772,6 +3772,11 @@ void rreplayCommand(client *c) {
         /* since we're skipping the above if statement, we still need these lines to run so that the fake client gets the payload*/
         exec_payload_argv = cloneArgvWithRef(payload_argv, payload_argc);
         exec_payload_argc = payload_argc;
+        if (exec_payload_argv == NULL) {
+            serverLog(LL_WARNING, "Invalid RREPLAY from primary: could not allocate payload argv clone");
+            freeClientAsync(c);
+            return;
+        }
     }
 
     int outer_argc = c->argc;
@@ -3809,10 +3814,13 @@ void rreplayCommand(client *c) {
     exec_client->realcmd = payload_cmd;
     exec_client->slot = -1;
 
-    
+    server.current_rreplay_hlc = &hlc_ts;
+    server.incoming_uuid = c->repl_data->replica_uuid;
     multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(payload_cmd);
     if (handler && handler->resolve) handler->resolve(handler,exec_client);
     else call(exec_client, CMD_CALL_PROPAGATE_AOF);
+    server.current_rreplay_hlc = NULL;
+    server.incoming_uuid = NULL;
 
     hlcStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, hlc_ts, replay_tie_break);
     if (exec_client->flag.blocked) {
