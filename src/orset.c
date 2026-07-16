@@ -103,7 +103,7 @@ orsetEntry *orsetGetOrCreateEntry(orset *os, sds member) {
 
 orset *orsetCreate(sds comp_key) {
     orset *os = zcalloc(sizeof(orset));
-    os->comp_key = sdsdup(comp_key);
+    os->comp_key = comp_key;
     os->entries = hashtableCreate(&orsetEntryHashtableType);
     return os;
 }
@@ -154,11 +154,11 @@ int orsetCollectTagsForMember(int dbid, sds key, sds member, orsetTag ***tags_ou
 
     orsetTag **arr = zcalloc(sizeof(orsetTag *) * n);
     int i = 0;
-    hashtableIterator *it = NULL;
-    hashtableInitIterator(it, ent->tagset, 0);
+    hashtableIterator it;
+    hashtableInitIterator(&it, ent->tagset, 0);
     void *tag_ptr;
-    while (hashtableNext(it, &tag_ptr)) arr[i++] = tag_ptr;
-    hashtableReleaseIterator(it);
+    while (hashtableNext(&it, &tag_ptr)) arr[i++] = tag_ptr;
+    hashtableReleaseIterator(&it);
 
     *tags_out = arr;
     return i;
