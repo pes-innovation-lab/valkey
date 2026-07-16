@@ -462,6 +462,15 @@ typedef enum {
 #define REPLICA_CAPA_SKIP_RDB_CHECKSUM_STR "skip-rdb-checksum" /* Supports skipping RDB checksum for sync requests. */
 #define REPLICA_CAPA_RREPLAY_PEER_STR "rreplay-peer"
 
+/* Current RREPLAY frame layout:
+ *   RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...]
+ *     idx:      1            2        3          4           5             6       7+
+ * (index 0 -> "RREPLAY" string itself). 
+ * Additional Note: The metadata field is a RESP bulk string carrying per-command data, or the sentinel "none". */
+#define RREPLAY_META_IDX 5
+#define RREPLAY_CMD_START_IDX 6
+#define RREPLAY_META_NONE "none"
+
 /* Replica requirements */
 #define REPLICA_REQ_NONE 0
 #define REPLICA_REQ_RDB_EXCLUDE_DATA (1 << 0)      /* Exclude data from RDB */
@@ -2225,6 +2234,7 @@ struct valkeyServer {
     int active_replica;   /* If enabled, this node may accept writes while being a replica. */
     int multi_master;     /* If enabled, allow multiple configured upstreams (scaffold). */
     int multi_master_no_forward; /* If enabled, avoid forwarding replay traffic (scaffold). */
+    hashtable *multi_master_whitelist; /* Dictionary containing commands allowed in multi-master mode. */
     dict *rreplay_seen;   /* Recent replay frames for dedupe. Key: "<origin-uuid>:<replay-id>" */
     list *rreplay_seen_order; /* FIFO order for replay dedupe eviction. Values are sds keys in rreplay_seen. */
     unsigned long long rreplay_seq; /* Local replay sequence generator used for outbound RREPLAY. */
@@ -2472,6 +2482,14 @@ struct valkeyServer {
     /* Local environment */
     char *locale_collate;
     char *debug_context; /* A free-form string that has no impact on server except being included in a crash report. */
+};
+
+typedef struct multimasterCommandHandler multimasterCommandHandler;
+
+struct multimasterCommandHandler{
+    int (*parse)(multimasterCommandHandler *self, sds raw);
+    robj *(*serialize)(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc);
+    void (*resolve)(multimasterCommandHandler *self, client *c);
 };
 
 #define MAX_KEYS_BUFFER 256
@@ -2808,6 +2826,8 @@ struct serverCommand {
     struct serverCommand *parent;
     struct ValkeyModuleCommand *module_cmd; /* A pointer to the module command data (NULL if native command) */
     sds info_cache[RESP_CACHE_INDEX_MAX];   /* Cached COMMAND INFO response: [0]=RESP2, [1]=RESP3 */
+
+    multimasterCommandHandler *command_handler;
 };
 
 struct serverError {
@@ -3282,6 +3302,7 @@ ssize_t syncReadLine(int fd, char *ptr, ssize_t size, long long timeout);
 int prepareReplicasToWrite(void);
 void replicationFeedReplicas(int dictid, robj **argv, int argc);
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc);
+multimasterCommandHandler *getMultimasterWhitelistedHandler(struct serverCommand *cmd);
 void replicationFeedStreamFromPrimaryStream(char *buf, size_t buflen);
 void replicationDetachUpstreamRuntimeClient(client *c);
 void resetReplicationBuffer(void);
@@ -3342,6 +3363,7 @@ sds replicationSendAuth(connection *conn);
 sds receiveSynchronousResponse(connection *conn);
 ConnectionType *connTypeOfReplication(void);
 robj *generateSelectCommand(int dictid);
+void registerMultimasterCommandHandler(sds cmd_name, multimasterCommandHandler *handler);
 
 /* Generic persistence functions */
 void startLoadingFile(size_t size, char *filename, int rdbflags);

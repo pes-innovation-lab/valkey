@@ -1443,6 +1443,29 @@ void rewriteConfigSaveOption(standardConfig *config, const char *name, struct re
     rewriteConfigMarkAsProcessed(state, name);
 }
 
+/* Emit a single 'multi-master-whitelist cmd1 cmd2 ...' line listing every whitelisted command.
+ * Accepts a space-separated list.
+ * When the whitelist is empty - nothing is written and also mark rewrite config as processed. */
+void rewriteConfigMultimasterWhitelistOption(standardConfig *config, const char *name, struct rewriteConfigState *state) {
+    UNUSED(config);
+
+    if (hashtableSize(server.multi_master_whitelist)) {
+        sds line = sdsnew(name);
+        dictIterator *di = hashtableCreateIterator(server.multi_master_whitelist, 0);
+        void *entry = NULL;
+        while (hashtableNext(di, &entry)) {
+            struct serverCommand *cmd = entry;
+            line = sdscatlen(line, " ", 1);
+            line = sdscatsds(line, cmd->fullname);
+        }
+        hashtableReleaseIterator(di);
+        rewriteConfigRewriteLine(state, name, line, 1); /* Last parameter is for forced write -
+                                                         * overwrite and modify in memory, not persisted to disk*/
+    }
+
+    rewriteConfigMarkAsProcessed(state, name);
+}
+
 /* Rewrite the user option. */
 void rewriteConfigUserOption(struct rewriteConfigState *state) {
     /* If there is a user file defined we just mark this configuration
@@ -2378,8 +2401,8 @@ static void numericConfigRewrite(standardConfig *config, const char *name, struc
     }
 
 #define createSpecialConfig(name, alias, modifiable, setfn, getfn, rewritefn, applyfn) \
-    {.type = SPECIAL_CONFIG,                                                           \
-     embedCommonConfig(name, alias, modifiable) embedConfigInterface(NULL, setfn, getfn, rewritefn, applyfn)}
+    { .type = SPECIAL_CONFIG,                                                          \
+      embedCommonConfig(name, alias, modifiable) embedConfigInterface(NULL, setfn, getfn, rewritefn, applyfn) }
 
 static int isValidActiveDefrag(int val, const char **err) {
 #ifndef HAVE_DEFRAG
@@ -2960,6 +2983,62 @@ static sds getConfigSaveOption(standardConfig *config) {
     return buf;
 }
 
+/* Populate server.multi_master_whitelist from a list of command names.
+ *  Each name must resolve to a known command via lookupCommandBySds().
+ *
+ * At runtime 'CONFIG SET multi-master-whitelist "..."' replaces the whole whitelist,
+ * while multiple 'multi-master-whitelist <cmd>' directives in the config file keep
+ * getting added to the dict. */
+static int setConfigMultimasterWhitelistOption(standardConfig *config, sds *argv, int argc, const char **err) {
+    UNUSED(config);
+    int j;
+
+    /* Treat a single empty argument as a request to clear the
+     * whitelist (e.g. CONFIG SET multi-master-whitelist ""). */
+    if (argc == 1 && sdslen(argv[0]) == 0) argc = 0;
+
+    /* Validate every command name before mutating the whitelist so an invalid
+     * entry leaves the current whitelist untouched. */
+    for (j = 0; j < argc; j++) {
+        if (lookupCommandBySds(argv[j]) == NULL) {
+            *err = "No such command in multi-master-whitelist";
+            return 0;
+        }
+    }
+
+    if (!reading_config_file) hashtableEmpty(server.multi_master_whitelist, NULL);
+
+    /* Add the validated commands to the whitelist;
+     * If a command is already in the dict, 
+     * we free this duplicate string to prevent memory leaks. */
+    for (j = 0; j < argc; j++) {
+        struct serverCommand *cmd = lookupCommandBySds(argv[j]);
+        hashtableAdd(server.multi_master_whitelist, cmd);
+    }
+
+    return 1;
+}
+
+/* Convert the server.multi_master_whitelist dict to a string,
+ * so it's human readable and is returned on a `CONFIG GET`  */
+static sds getConfigMultimasterWhitelistOption(standardConfig *config) {
+    UNUSED(config);
+    sds buf = sdsempty();
+    dictIterator *di = hashtableCreateIterator(server.multi_master_whitelist, 0);
+    int first = 1;
+    void *entry = NULL;
+    while (hashtableNext(di, &entry)) {
+        struct serverCommand *we = entry;
+        if (!first) buf = sdscatlen(buf, " ", 1);
+
+        buf = sdscatsds(buf, we->fullname);
+        first = 0;
+    }
+    hashtableReleaseIterator(di);
+
+    return buf;
+}
+
 static int setConfigClientOutputBufferLimitOption(standardConfig *config, sds *argv, int argc, const char **err) {
     UNUSED(config);
     return updateClientOutputBufferLimit(argv, argc, err);
@@ -3498,7 +3577,7 @@ standardConfig static_configs[] = {
     /* hlc-rdb-clock-max-entries controls the maximum number of persisted HLC key clocks in RDB AUX. */
     createLongLongConfig("hlc-rdb-clock-max-entries", NULL, MODIFIABLE_CONFIG, 0, LLONG_MAX, server.hlc_rdb_clock_max_entries, CONFIG_DEFAULT_HLC_RDB_CLOCK_MAX_ENTRIES, INTEGER_CONFIG, NULL, NULL),
     /* hlc-max-clock-drift is the maximum tolerated drift (in microseconds) between the HLC wall
-     * time and the local physical clock. 
+     * time and the local physical clock.
      * Set to 0 to disable checks. Default: 500 ms. */
     createLongLongConfig("hlc-max-clock-drift", NULL, MODIFIABLE_CONFIG, 0, LLONG_MAX, server.hlc_max_clock_drift, CONFIG_DEFAULT_HLC_MAX_CLOCK_DRIFT_USEC, INTEGER_CONFIG, NULL, NULL),
     createLongLongConfig("cluster-manual-failover-timeout", NULL, MODIFIABLE_CONFIG, 1, INT_MAX, server.cluster_mf_timeout, 5000, INTEGER_CONFIG, NULL, NULL),
@@ -3555,6 +3634,7 @@ standardConfig static_configs[] = {
     /* Special configs */
     createSpecialConfig("dir", NULL, MODIFIABLE_CONFIG | PROTECTED_CONFIG | DENY_LOADING_CONFIG, setConfigDirOption, getConfigDirOption, rewriteConfigDirOption, NULL),
     createSpecialConfig("save", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigSaveOption, getConfigSaveOption, rewriteConfigSaveOption, NULL),
+    createSpecialConfig("multi-master-whitelist", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigMultimasterWhitelistOption, getConfigMultimasterWhitelistOption, rewriteConfigMultimasterWhitelistOption, NULL),
     createSpecialConfig("client-output-buffer-limit", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigClientOutputBufferLimitOption, getConfigClientOutputBufferLimitOption, rewriteConfigClientOutputBufferLimitOption, NULL),
     createSpecialConfig("oom-score-adj-values", NULL, MODIFIABLE_CONFIG | MULTI_ARG_CONFIG, setConfigOOMScoreAdjValuesOption, getConfigOOMScoreAdjValuesOption, rewriteConfigOOMScoreAdjValuesOption, updateOOMScoreAdj),
     createSpecialConfig("notify-keyspace-events", NULL, MODIFIABLE_CONFIG, setConfigNotifyKeyspaceEventsOption, getConfigNotifyKeyspaceEventsOption, rewriteConfigNotifyKeyspaceEventsOption, NULL),

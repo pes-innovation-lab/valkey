@@ -2388,6 +2388,7 @@ void initServerConfig(void) {
     server.active_replica = 0;
     server.multi_master = 0;
     server.multi_master_no_forward = 0;
+    server.multi_master_whitelist = hashtableCreate(&originalCommandSetType);
     server.rreplay_seen = NULL;
     server.rreplay_seen_order = NULL;
     server.rreplay_seq = 0;
@@ -3609,6 +3610,23 @@ bool clientSupportStandAloneRedirect(client *c) {
     return !server.cluster_enabled && server.primary_host && c->capa & CLIENT_CAPA_REDIRECT;
 }
 
+multimasterCommandHandler *getMultimasterWhitelistedHandler(struct serverCommand *cmd) {
+    void *entry = NULL;
+    if(hashtableFind(server.multi_master_whitelist, cmd->fullname, &entry)){
+        struct serverCommand *sc = (struct serverCommand *)entry;
+        return sc->command_handler;
+    }
+    return NULL;
+}
+
+void registerMultimasterCommandHandler(sds cmd_name, multimasterCommandHandler *handler) {
+    void *entry = NULL;
+    if (hashtableFind(server.multi_master_whitelist, cmd_name, &entry)) {
+        struct serverCommand *sc = entry;
+        sc->command_handler = handler;
+    }
+}
+
 static int shouldForwardToPrimaryViaRReplay(int target) {
     if (!(target & PROPAGATE_REPL)) return 0;
     if (!server.active_replica || !server.multi_master) return 0;
@@ -3977,7 +3995,7 @@ void call(client *c, int flags) {
             debug_argv_refcount[i] = c->original_argv ? c->original_argv[i]->refcount : c->argv[i]->refcount;
         }
     }
-
+    
     c->cmd->proc(c);
 
     if (c->flag.argv_borrowed && server.enable_debug_assert) {
@@ -4486,6 +4504,25 @@ int processCommand(client *c) {
         return C_OK;
     }
 
+    /* whitelist check for multi-master mode.
+     * A write command sent by an external client must have an explicit conflict resolution strategy,
+     * and if that is the case, the command must be whitelisted in the config,
+     * otherwise it is rejected here.
+     * So it is neither applied locally nor forwarded via RREPLAY,
+     * this ensures peers don't diverge.
+     *
+     * Skipped when:
+     * - not in A/A,
+     * - command is read-only,
+     * - command arrives from replication link / fake client,
+     * - whitelist is empty. */
+    if (server.multi_master && server.active_replica && is_write_command && !isReplicatedClient(c) && !c->flag.fake &&
+        hashtableSize(server.multi_master_whitelist) > 0 && !getMultimasterWhitelistedHandler(c->cmd)) {
+        rejectCommandFormat(c, 1, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
+        serverLog(LL_WARNING, "command '%s' is not whitelisted in multi-master mode. The operation was not applied.", c->cmd->fullname);
+        return C_OK;
+    }
+
     /* If cluster is enabled perform the cluster redirection here.
      * However we don't perform the redirection if:
      * 1) The sender of this command is our primary.
@@ -4745,7 +4782,9 @@ int processCommand(client *c) {
         addReply(c, shared.queued);
     } else {
         int flags = CMD_CALL_FULL;
-        call(c, flags);
+        multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(c->cmd);
+        if (handler && handler->resolve) handler->resolve(handler,c);
+        else call(c, flags);
         if (listLength(server.ready_keys) && !isInsideYieldingLongCommand()) handleClientsBlockedOnKeys();
     }
     return C_OK;

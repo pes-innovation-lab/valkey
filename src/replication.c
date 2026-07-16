@@ -1758,6 +1758,33 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
     return 1;
 }
 
+/* Parse and validate the metadata field of an inbound RREPLAY frame.
+ * 
+ * 'meta' is the raw bulk-string value at index RREPLAY_META_IDX.
+ * Returns `C_OK` and fills '*out' on success, or `C_ERR` on error.
+ * Calls the respective command's parse handler. 
+ * This function requires the executing command to have a handler struct associated with it */
+static int rreplayMultimasterMetadataParse(sds meta, struct serverCommand *cmd) {
+    if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
+    multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
+    if (!handler) return C_ERR;
+    if (handler->parse(handler,meta) != C_OK){
+        serverLog(LL_WARNING, "Unsupported metadata format: %s", meta ? meta : "(null)");
+        return C_ERR;
+    }
+    return C_OK;
+}
+
+/* Produce the metadata field for an outbound RREPLAY frame. 
+ * Currently a stub that always emits the "none" sentinel; 
+ * Calls the serialize function registered with the command handler of the executing command 
+ * This function requires the executing command to have a handler struct associated with it */
+static robj *rreplayMultimasterMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
+    multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
+    if (handler) return handler->serialize(handler,cmd,argv,argc);
+    return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
+}
+
 /* Return the pointer to a string representing the replica ip:listening_port
  * pair. Mostly useful for logging, since we want to log a replica using its
  * IP address and its listening port which is more clear for the user, for
@@ -2416,7 +2443,7 @@ static void forwardRawRReplayFrameToUpstreams(robj **argv, int argc, client *exc
 /* Encapsulate a locally generated command and send it upstream to the
  * connected primary as an active-active replay frame.
  *
- * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <command> [arg ...] */
+ * Format: RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...] */
 void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     if (dictid < 0 || argv == NULL || argc <= 0) return;
 
@@ -2424,6 +2451,16 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     robj **payload_argv = argv;
     int payload_argc = argc;
     int payload_owned = 0;
+
+    /* multimaster whitelist gate. 
+     * `processCommand()` will reject non-whitelisted writes before they reach here, 
+     * but a commands can slip through through other paths (eg: alsoPropagate),
+     * to be a 100% we perform a check on the RREPLAY as well. */
+    if (hashtableSize(server.multi_master_whitelist) > 0 && !getMultimasterWhitelistedHandler(payload_cmd)) {
+        serverLog(LL_WARNING, "Skipping RREPLAY for non-whitelisted command '%s'",
+                  payload_cmd ? payload_cmd->fullname : (argv[0] ? (char *)objectGetVal(argv[0]) : "?"));
+        return;
+    }
 
     if (rreplayCommandIsRiskyRmw(payload_cmd)) {
         const char *canonical_reason = NULL;
@@ -2453,7 +2490,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     snprintf(replay_tie_break, sizeof(replay_tie_break), "%s:%llu", server.runid, replay_id);
     hlcStampCommandKeys(payload_cmd, payload_argv, payload_argc, dictid, hlc_ts, replay_tie_break);
 
-    int frame_argc = payload_argc + 5;
+    int frame_argc = payload_argc + RREPLAY_CMD_START_IDX;
     robj **frame_argv = zmalloc(sizeof(robj *) * frame_argc);
     frame_argv[0] = createStringObject("RREPLAY", 7);
     frame_argv[1] = createStringObject(server.runid, CONFIG_RUN_ID_SIZE);
@@ -2466,9 +2503,12 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
                            (unsigned long long)hlc_ts.wall_time,
                            (unsigned long long)hlc_ts.logical);
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
+    /* metadata field (index 5). Currently the "none" sentinel; 
+     * future per-command strategies for multimaster will populate it via rreplayMultimasterMetadataSerialize. */
+    frame_argv[RREPLAY_META_IDX] = rreplayMultimasterMetadataSerialize(payload_cmd, payload_argv, payload_argc);
     for (int j = 0; j < payload_argc; j++) {
-        frame_argv[j + 5] = payload_argv[j];
-        incrRefCount(frame_argv[j + 5]);
+        frame_argv[j + RREPLAY_CMD_START_IDX] = payload_argv[j];
+        incrRefCount(frame_argv[j + RREPLAY_CMD_START_IDX]);
     }
 
     /* In active-replica multi-master mode, RREPLAY frames must enter the local
@@ -3486,7 +3526,8 @@ void replconfCommand(client *c) {
     addReply(c, shared.ok);
 }
 
-/* RREPLAY <origin-uuid> <dbid> <replay-id> [<hlc-ts>] <command> [arg ...]
+/* RREPLAY <origin-uuid> <dbid> <replay-id> <hlc-ts> <metadata> <command> [arg ...]
+ *   idx:      1            2        3          4           5             6       7+
  * Internal active-active replay wrapper.
  *
  * Accepted from replication links and from internal multi-master peer links.
@@ -3507,7 +3548,7 @@ void rreplayCommand(client *c) {
      * wrapper command again via call() dirty accounting. */
     preventCommandPropagation(c);
 
-    if (c->argc < 5) {
+    if (c->argc < 6) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing payload command");
         freeClientAsync(c);
         return;
@@ -3559,8 +3600,8 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    if (c->argc < 6) {
-        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp or payload command");
+    if (c->argc < 7) {
+        serverLog(LL_WARNING, "Invalid RREPLAY from primary: missing HLC timestamp, metadata or payload command");
         freeClientAsync(c);
         return;
     }
@@ -3632,13 +3673,32 @@ void rreplayCommand(client *c) {
         server.hlc_clock.wall_time = max_wall;
     }
 
-    int payload_argc = c->argc - 5;
-    robj **payload_argv = c->argv + 5;
+    int payload_argc = c->argc - RREPLAY_CMD_START_IDX;
+    robj **payload_argv = c->argv + RREPLAY_CMD_START_IDX;
     struct serverCommand *payload_cmd = lookupCommand(payload_argv, payload_argc);
     if (!payload_cmd) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: unknown command '%s'",
                   (char *)objectGetVal(payload_argv[0]));
         freeClientAsync(c);
+        return;
+    }
+
+    /* multimaster whitelist gate. 
+     * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
+     * Skip when the whitelist is empty. */
+    if (hashtableSize(server.multi_master_whitelist) > 0 && !getMultimasterWhitelistedHandler(payload_cmd)) {
+        serverLog(LL_WARNING, "Skipping non-whitelisted RREPLAY command '%s'", payload_cmd->fullname);
+        if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
+        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
+        return;
+    }
+
+    /* Validate the metadata field (id 5). 
+     * Skip unrecognized format - (rreplayMultimasterMetadataParse emits the warning) */
+    sds command_meta = objectGetVal(c->argv[RREPLAY_META_IDX]);
+    if (rreplayMultimasterMetadataParse(command_meta, payload_cmd) != C_OK) {
+        if (from_primary_link) c->flag.skip_repl_stream_propagation = 1;
+        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
         return;
     }
 
@@ -3732,10 +3792,10 @@ void rreplayCommand(client *c) {
     exec_client->lastcmd = payload_cmd;
     exec_client->realcmd = payload_cmd;
     exec_client->slot = -1;
-
-    /* Keep AOF propagation behavior, but avoid direct command replication.
-     * The raw RREPLAY frame is forwarded through the replication stream path. */
-    call(exec_client, CMD_CALL_PROPAGATE_AOF);
+    
+    multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(payload_cmd);
+    if (handler && handler->resolve) handler->resolve(handler,exec_client);
+    else call(exec_client, CMD_CALL_PROPAGATE_AOF);
     hlcStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, hlc_ts, replay_tie_break);
     if (exec_client->flag.blocked) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: payload command '%s' blocked", payload_cmd->fullname);
