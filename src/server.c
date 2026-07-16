@@ -52,6 +52,7 @@
 #include "module.h"
 #include "scripting_engine.h"
 #include "util.h"
+#include "orset.h"
 
 #include "eval.h"
 
@@ -2452,6 +2453,10 @@ void initServerConfig(void) {
 
     /* Debugging */
     server.watchdog_period = 0;
+
+    /* OR-Set */
+    server.orsets = hashtableCreate(&orsetHashtableType);
+    server.orset_deleted_tags = NULL;
 }
 
 extern char **environ;

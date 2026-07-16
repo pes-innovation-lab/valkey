@@ -2482,6 +2482,9 @@ struct valkeyServer {
     /* Local environment */
     char *locale_collate;
     char *debug_context; /* A free-form string that has no impact on server except being included in a crash report. */
+    /* CRDT stuff */
+    hashtable *orsets;
+    sds orset_deleted_tags;
 };
 
 typedef struct multimasterCommandHandler multimasterCommandHandler;
