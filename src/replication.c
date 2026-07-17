@@ -3732,25 +3732,34 @@ void rreplayCommand(client *c) {
 
     robj **exec_payload_argv = NULL;
     int exec_payload_argc = 0;
-    if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
-        exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
-                                                     &exec_payload_argc);
-        if (exec_payload_argv == NULL || exec_payload_argc <= 1) {
+    if (payload_cmd->proc != saddCommand && payload_cmd->proc != sremCommand) {
+        if (payload_cmd->proc == msetCommand && (hlc_ts.wall_time > 0 || hlc_ts.logical > 0) && dbid >= 0) {
+            exec_payload_argv = hlcBuildFreshMsetPayload(payload_argv, payload_argc, (int)dbid, hlc_ts, replay_tie_break,
+                                                         &exec_payload_argc);
+            if (exec_payload_argv == NULL || exec_payload_argc <= 1) {
+                if (from_primary_link) {
+                    c->flag.skip_repl_stream_propagation = 1;
+                }
+                if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
+                return;
+            }
+        } else if (!hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
             if (from_primary_link) {
                 c->flag.skip_repl_stream_propagation = 1;
             }
             if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
             return;
+        } else {
+            exec_payload_argv = cloneArgvWithRef(payload_argv, payload_argc);
+            exec_payload_argc = payload_argc;
+            if (exec_payload_argv == NULL) {
+                serverLog(LL_WARNING, "Invalid RREPLAY from primary: could not allocate payload argv clone");
+                freeClientAsync(c);
+                return;
+            }
         }
-    } else if (payload_cmd->proc != saddCommand &&
-               payload_cmd->proc != sremCommand &&
-               !hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
-        if (from_primary_link) {
-            c->flag.skip_repl_stream_propagation = 1;
-        }
-        if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
-        return;
-    } else {
+    }
+    else {
         exec_payload_argv = cloneArgvWithRef(payload_argv, payload_argc);
         exec_payload_argc = payload_argc;
         if (exec_payload_argv == NULL) {
