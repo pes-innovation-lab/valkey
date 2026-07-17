@@ -8,6 +8,20 @@
 #include "endianconv.h"
 #include "hashtable.h"
 #include "zmalloc.h"
+#include <string.h>
+
+/*======================= Command Handler Structs =========================== */
+
+typedef struct orsetParsedMeta {
+    int is_sadd;
+    int ntags;
+    orsetTag *tags;
+} orsetParsedMeta;
+
+typedef struct orsetCommandHandler {
+    multimasterCommandHandler handler;
+    orsetParsedMeta parsed;
+} orsetCommandHandler;
 
 /*==================== HashtableType Implementations ======================== */
 
@@ -200,4 +214,105 @@ void orsetApplySrem(int dbid, sds key, sds member, orsetTag **tags, int ntags) {
             sdsfree(comp);
         }
     }
+}
+
+/*========================== Command Handler Functions =======================*/
+
+/* Parse OR-Set metadata from a raw command string. The expected format is:
+ * <cmd>,<node_id>:<wall_time>:<logical>[,<node_id>:<wall_time>:<logical>...] */
+int orsetMetadataParse(multimasterCommandHandler *self, sds raw) {
+    orsetCommandHandler *osh = (orsetCommandHandler *)self;
+
+    /* Reset previous parsing state */
+    if (osh->parsed.tags) {
+        zfree(osh->parsed.tags);
+        osh->parsed.tags = NULL;
+    }
+
+    osh->parsed.ntags = 0;
+    osh->parsed.is_sadd = (strncmp(raw, "sadd", 4) == 0);
+
+    char *body = strchr(raw, ',');
+    if (!body) return C_OK; /* No tags */
+    body++;                 /* Skip comma */
+
+    int count = 1;
+    for (char *p = body; *p; p++)
+        if (*p == ',') count++;
+
+    osh->parsed.tags = zmalloc(sizeof(orsetTag) * count);
+    int filled = 0;
+    char *tok = body;
+    while (tok && *tok) {
+        char *comma = strchr(tok, ',');
+        if (comma) *comma = '\0';
+
+        if ((int)strlen(tok) > CONFIG_RUN_ID_SIZE + 1) {
+            char *rest = tok + CONFIG_RUN_ID_SIZE + 1;
+            unsigned long long wall = 0, logical = 0;
+            if (sscanf(rest, "%llu:%llu", &wall, &logical) == 2) {
+                memcpy(osh->parsed.tags[filled].node_id, tok, CONFIG_RUN_ID_SIZE);
+                osh->parsed.tags[filled].node_id[CONFIG_RUN_ID_SIZE] = '\0';
+                osh->parsed.tags[filled].ts.wall_time = wall;
+                osh->parsed.tags[filled].ts.logical = logical;
+                filled++;
+            }
+        }
+
+        if (comma) *comma = ',';
+        tok = comma ? comma + 1 : NULL;
+    }
+    osh->parsed.ntags = filled;
+    return C_OK;
+}
+
+robj *orsetSaddSerialize(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc) {
+    UNUSED(self);
+    UNUSED(cmd);
+    if (argc < 3) return createStringObject("none", 4);
+
+    sds key = objectGetVal(argv[1]);
+    serverDb *db = server.executing_client ? server.executing_client->db : server.db[0];
+    orset *os = orsetLookup(db->id, key);
+    if (!os) return createStringObject("none", 4);
+
+    sds buf = sdsnew("sadd");
+    for (int j = 2; j < argc; j++) {
+        sds member = objectGetVal(argv[j]);
+        void *ent_ptr = NULL;
+        if (!hashtableFind(os->entries, member, &ent_ptr)) continue;
+        orsetEntry *ent = ent_ptr;
+
+        /* Find the tag with the highest HLC (the one we just created in resolve) */
+        orsetTag *latest = NULL;
+        hashtableIterator *it = NULL;
+        hashtableInitIterator(it, ent->tagset, 0);
+        void *tp;
+        while (hashtableNext(it, &tp)) {
+            orsetTag *t = tp;
+            if (!latest || hlcCompare(&t->ts, &latest->ts) > 0) latest = t;
+        }
+        hashtableReleaseIterator(it);
+
+        if (latest) {
+            buf = sdscatfmt(buf, ",%s:%U:%U",
+                            latest->node_id,
+                            (unsigned long long)latest->ts.wall_time,
+                            (unsigned long long)latest->ts.logical);
+        }
+    }
+    robj *meta = createStringObject(buf, sdslen(buf));
+    sdsfree(buf);
+    return meta;
+}
+
+robj *orsetSremSerialize(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc) {
+    UNUSED(self); UNUSED(cmd); UNUSED(argv); UNUSED(argc);
+    if (server.orset_deleted_tags) {
+        robj *meta = createStringObject(server.orset_deleted_tags, sdslen(server.orset_deleted_tags));
+        sdsfree(server.orset_deleted_tags);
+        server.orset_deleted_tags = NULL;
+        return meta;
+    }
+    return createStringObject("none", 4);
 }
