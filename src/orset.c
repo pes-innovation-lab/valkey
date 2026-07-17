@@ -316,3 +316,124 @@ robj *orsetSremSerialize(multimasterCommandHandler *self, struct serverCommand *
     }
     return createStringObject("none", 4);
 }
+
+void orsetResolve(multimasterCommandHandler *self, client *c) {
+    orsetCommandHandler *osh = (orsetCommandHandler *)self;
+    sds key = objectGetVal(c->argv[1]);
+
+    if (!c->flag.fake) {
+        /* LOCAL CLIENT WRITE (SADD/SREM)
+         * 1. Update the OR-Set metadata. */
+        if (osh->handler.serialize == orsetSaddSerialize) {
+            /* SADD local: Add a new HLC tag for each member */
+            for (int j = 2; j < c->argc; j++) {
+                sds member = objectGetVal(c->argv[j]);
+                orsetAddMember(c->db->id, key, member);
+            }
+        } else {
+            /* SREM local: Stash current tags for serialization, then remove from OR-Set */
+            if (server.orset_deleted_tags) sdsfree(server.orset_deleted_tags);
+            server.orset_deleted_tags = sdsnew("srem");
+
+            for (int j = 2; j < c->argc; j++) {
+                sds member = objectGetVal(c->argv[j]);
+                orsetTag **tags = NULL;
+                int ntags = orsetCollectTagsForMember(c->db->id, key, member, &tags);
+                for (int k = 0; k < ntags; k++) {
+                    server.orset_deleted_tags = sdscatfmt(
+                        server.orset_deleted_tags, ",%s:%U:%U",
+                        tags[k]->node_id,
+                        (unsigned long long)tags[k]->ts.wall_time,
+                        (unsigned long long)tags[k]->ts.logical
+                    );
+                }
+                if (ntags > 0) {
+                    orsetApplySrem(c->db->id, key, member, tags, ntags);
+                }
+                if (tags) zfree(tags);
+            }
+        }
+
+        /* 2. Execute standard database command logic (mutates Set, handles AOF, replies, dirty++) */
+        call(c, CMD_CALL_FULL);
+        return;
+    }
+
+    /* REPLICATED WRITE (SADD/SREM Replay)
+     * 1. Save original client parameters. */
+    robj **orig_argv = c->argv;
+    int orig_argc = c->argc;
+    struct serverCommand *orig_cmd = c->cmd;
+    struct serverCommand *orig_lastcmd = c->lastcmd;
+    struct serverCommand *orig_realcmd = c->realcmd;
+
+    /* 2. Process each member in the payload. */
+    for (int j = 2; j < orig_argc; j++) {
+        sds member = objectGetVal(orig_argv[j]);
+        int is_sadd = osh->parsed.is_sadd;
+
+        if (is_sadd) {
+            if ((j - 2) < osh->parsed.ntags) {
+                orsetApplySadd(c->db->id, key, member, &osh->parsed.tags[j - 2]);
+            }
+        } else {
+            orsetApplySrem(c->db->id, key, member, &osh->parsed.tags, osh->parsed.ntags);
+        }
+
+        /* 3. Determine if the element state in the database needs to change. */
+        robj *setobj = lookupKeyWrite(c->db, orig_argv[1]);
+        int member_exists = setobj && setTypeIsMember(setobj, member);
+
+        orset *os = orsetLookup(c->db->id, key);
+        void *ent_ptr = NULL;
+        int should_exist = os && hashtableFind(os->entries, member, &ent_ptr);
+
+        int execute_mutation = 0;
+        char *mutate_cmd = NULL;
+
+        if (should_exist && !member_exists) {
+            execute_mutation = 1;
+            mutate_cmd = "SADD";
+        } else if (!should_exist && member_exists) {
+            execute_mutation = 1;
+            mutate_cmd = "SREM";
+        }
+
+        /* 4. Trigger specific mutation on the database if necessary. */
+        if (execute_mutation) {
+            robj *temp_argv[3];
+            temp_argv[0] = createStringObject(mutate_cmd, 4);
+            temp_argv[1] = orig_argv[1];
+            temp_argv[2] = orig_argv[j];
+            incrRefCount(temp_argv[0]);
+            incrRefCount(temp_argv[1]);
+            incrRefCount(temp_argv[2]);
+
+            c->argv = temp_argv;
+            c->argc = 3;
+            c->cmd = lookupCommand(c->argv, 3);
+            c->lastcmd = c->cmd;
+            c->realcmd = c->cmd;
+
+            call(c, CMD_CALL_PROPAGATE_AOF);
+
+            decrRefCount(temp_argv[0]);
+            decrRefCount(temp_argv[1]);
+            decrRefCount(temp_argv[2]);
+        }
+    }
+
+    /* 5. Restore original client context. */
+    c->argv = orig_argv;
+    c->argc = orig_argc;
+    c->cmd = orig_cmd;
+    c->lastcmd = orig_lastcmd;
+    c->realcmd = orig_realcmd;
+
+    /* 6. Free parsed metadata tags. */
+    if (osh->parsed.tags) {
+        zfree(osh->parsed.tags);
+        osh->parsed.tags = NULL;
+    }
+    osh->parsed.ntags = 0;
+}
