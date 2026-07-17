@@ -437,3 +437,28 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
     }
     osh->parsed.ntags = 0;
 }
+
+/*========================== Command Handler Registration ====================*/
+
+orsetCommandHandler saddOrsetHandler = {
+    .handler = {
+        .parse = orsetMetadataParse,
+        .serialize = orsetSaddSerialize,
+        .resolve = orsetResolve
+    },
+    .parsed = {0, 0, NULL}
+};
+
+orsetCommandHandler sremOrsetHandler = {
+    .handler = {
+        .parse = orsetMetadataParse,
+        .serialize = orsetSremSerialize,
+        .resolve = orsetResolve
+    },
+    .parsed = {0, 0, NULL}
+};
+
+void initOrSetCrdt(void) {
+    registerMultimasterCommandHandler(sdsnew("sadd"), (multimasterCommandHandler *)&saddOrsetHandler);
+    registerMultimasterCommandHandler(sdsnew("srem"), (multimasterCommandHandler *)&sremOrsetHandler);
+}

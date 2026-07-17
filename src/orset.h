@@ -33,6 +33,9 @@ void orsetDelete(int dbid, sds key);
 void orsetApplySadd(int dbid, sds key, sds member, const orsetTag *tag);
 void orsetApplySrem(int dbid, sds key, sds member, orsetTag **tags, int ntags);
 
+/* Command Handler Registration */
+void initOrSetCrdt(void);
+
 /* Hashtable Types */
 extern hashtableType orsetHashtableType;
 extern hashtableType orsetEntryHashtableType;

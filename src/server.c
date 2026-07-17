@@ -3164,6 +3164,8 @@ void initServer(void) {
     applyWatchdogPeriod();
 
     if (server.maxmemory_clients != 0) initServerClientMemUsageBuckets();
+
+    initOrSetCrdt();
 }
 
 void initListeners(void) {
