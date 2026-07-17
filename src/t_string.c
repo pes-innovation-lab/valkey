@@ -33,6 +33,7 @@
  */
 
 #include "server.h"
+#include "bwrga.h"
 #include <math.h> /* isnan(), isinf() */
 
 /* Forward declarations */
@@ -309,6 +310,13 @@ int getGenericCommand(client *c) {
         return C_ERR;
     }
 
+    if (o->encoding == OBJ_ENCODING_BWRGA) {
+        /* addReplyBulk assumes RAW/EMBSTR/INT internally -- materialize and
+         * reply directly instead of routing a BWRGA object through it. */
+        addReplyBulkSds(c, bwrgaMaterialize(objectGetVal(o)));
+        return C_OK;
+    }
+
     addReplyBulk(c, o);
     return C_OK;
 }
@@ -491,6 +499,7 @@ void getrangeCommand(client *c) {
     long long start, end;
     char *str, llbuf[32];
     size_t strlen;
+    sds materialized = NULL; /* only set (and needing sdsfree) for BWRGA */
 
     if (getLongLongFromObjectOrReply(c, c->argv[2], &start, NULL) != C_OK)
         return;
@@ -502,6 +511,10 @@ void getrangeCommand(client *c) {
     if (o->encoding == OBJ_ENCODING_INT) {
         str = llbuf;
         strlen = ll2string(llbuf, sizeof(llbuf), (long)objectGetVal(o));
+    } else if (o->encoding == OBJ_ENCODING_BWRGA) {
+        materialized = bwrgaMaterialize(objectGetVal(o));
+        str = materialized;
+        strlen = sdslen(materialized);
     } else {
         str = objectGetVal(o);
         strlen = sdslen(str);
@@ -510,6 +523,7 @@ void getrangeCommand(client *c) {
     /* Convert negative indexes */
     if (start < 0 && end < 0 && start > end) {
         addReply(c, shared.emptybulk);
+        if (materialized) sdsfree(materialized);
         return;
     }
     if (start < 0) start = strlen + start;
@@ -525,6 +539,7 @@ void getrangeCommand(client *c) {
     } else {
         addReplyBulkCBuffer(c, (char *)str + start, end - start + 1);
     }
+    if (materialized) sdsfree(materialized);
 }
 
 void mgetCommand(client *c) {

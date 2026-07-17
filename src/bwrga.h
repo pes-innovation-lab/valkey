@@ -80,5 +80,8 @@ void bwrgaMerge(bwrga_t *dest, bwrga_t *src);
 /* Materializes the linked list of live blocks into a contiguous SDS string */
 sds bwrgaMaterialize(bwrga_t *b);
 
+/* Sums live fragment lengths without materializing content -- cheap length-only query */
+size_t bwrgaVisibleLength(bwrga_t *b);
+
 
 #endif

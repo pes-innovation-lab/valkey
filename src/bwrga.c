@@ -521,3 +521,18 @@ sds bwrgaMaterialize(bwrga_t *b) {
     }
     return s;
 }
+
+/* Sums live fragment lengths without allocating or copying any content --
+ * for callers that only need the visible length, not the string itself. */
+size_t bwrgaVisibleLength(bwrga_t *b) {
+    size_t len = 0;
+    if (b == NULL) return len;
+    rga_block_t *cur = b->head;
+    while (cur != NULL) {
+        if (!cur->is_tombstone) {
+            len += cur->length;
+        }
+        cur = cur->nextLink;
+    }
+    return len;
+}

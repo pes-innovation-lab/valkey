@@ -1037,6 +1037,8 @@ size_t stringObjectLen(robj *o) {
     serverAssertWithInfo(NULL, o, o->type == OBJ_STRING);
     if (sdsEncodedObject(o)) {
         return sdslen(objectGetVal(o));
+    } else if (o->encoding == OBJ_ENCODING_BWRGA) {
+        return bwrgaVisibleLength(objectGetVal(o));
     } else {
         return sdigits10((long)objectGetVal(o));
     }
