@@ -357,7 +357,12 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
         }
 
         /* 2. Execute standard database command logic (mutates Set, handles AOF, replies, dirty++) */
-        call(c, CMD_CALL_FULL);
+        /* Use AOF-only propagation. RREPLAY is always sent separately below
+         * because a new tag was created even if the member already existed. */
+        call(c, CMD_CALL_PROPAGATE_AOF);
+        if (osh->handler.serialize == orsetSaddSerialize) {
+            replicationFeedPrimaryWithRReplay(c->db->id, c->argv, c->argc);
+        }
         return;
     }
 
