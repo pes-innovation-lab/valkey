@@ -172,7 +172,7 @@ int orsetCollectTagsForMember(int dbid, sds key, sds member, orsetTag ***tags_ou
     hashtableInitIterator(&it, ent->tagset, 0);
     void *tag_ptr;
     while (hashtableNext(&it, &tag_ptr)) arr[i++] = tag_ptr;
-    hashtableReleaseIterator(&it);
+    hashtableCleanupIterator(&it);
 
     *tags_out = arr;
     return i;
@@ -285,14 +285,14 @@ robj *orsetSaddSerialize(multimasterCommandHandler *self, struct serverCommand *
 
         /* Find the tag with the highest HLC (the one we just created in resolve) */
         orsetTag *latest = NULL;
-        hashtableIterator *it = NULL;
-        hashtableInitIterator(it, ent->tagset, 0);
+        hashtableIterator it;
+        hashtableInitIterator(&it, ent->tagset, 0);
         void *tp;
-        while (hashtableNext(it, &tp)) {
+        while (hashtableNext(&it, &tp)) {
             orsetTag *t = tp;
             if (!latest || hlcCompare(&t->ts, &latest->ts) > 0) latest = t;
         }
-        hashtableReleaseIterator(it);
+        hashtableCleanupIterator(&it);
 
         if (latest) {
             buf = sdscatfmt(buf, ",%s:%U:%U",
@@ -307,7 +307,10 @@ robj *orsetSaddSerialize(multimasterCommandHandler *self, struct serverCommand *
 }
 
 robj *orsetSremSerialize(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc) {
-    UNUSED(self); UNUSED(cmd); UNUSED(argv); UNUSED(argc);
+    UNUSED(self);
+    UNUSED(cmd);
+    UNUSED(argv);
+    UNUSED(argc);
     if (server.orset_deleted_tags) {
         robj *meta = createStringObject(server.orset_deleted_tags, sdslen(server.orset_deleted_tags));
         sdsfree(server.orset_deleted_tags);
@@ -344,8 +347,7 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
                         server.orset_deleted_tags, ",%s:%U:%U",
                         tags[k]->node_id,
                         (unsigned long long)tags[k]->ts.wall_time,
-                        (unsigned long long)tags[k]->ts.logical
-                    );
+                        (unsigned long long)tags[k]->ts.logical);
                 }
                 if (ntags > 0) {
                     orsetApplySrem(c->db->id, key, member, tags, ntags);
@@ -377,7 +379,13 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
                 orsetApplySadd(c->db->id, key, member, &osh->parsed.tags[j - 2]);
             }
         } else {
-            orsetApplySrem(c->db->id, key, member, &osh->parsed.tags, osh->parsed.ntags);
+            /* Build a temporary array of pointers to the parsed tags */
+            orsetTag **temp_tags = zmalloc(sizeof(orsetTag *) * osh->parsed.ntags);
+            for (int k = 0; k < osh->parsed.ntags; k++) {
+                temp_tags[k] = &osh->parsed.tags[k];
+            }
+            orsetApplySrem(c->db->id, key, member, temp_tags, osh->parsed.ntags);
+            zfree(temp_tags);
         }
 
         /* 3. Determine if the element state in the database needs to change. */
@@ -444,19 +452,15 @@ orsetCommandHandler saddOrsetHandler = {
     .handler = {
         .parse = orsetMetadataParse,
         .serialize = orsetSaddSerialize,
-        .resolve = orsetResolve
-    },
-    .parsed = {0, 0, NULL}
-};
+        .resolve = orsetResolve},
+    .parsed = {0, 0, NULL}};
 
 orsetCommandHandler sremOrsetHandler = {
     .handler = {
         .parse = orsetMetadataParse,
         .serialize = orsetSremSerialize,
-        .resolve = orsetResolve
-    },
-    .parsed = {0, 0, NULL}
-};
+        .resolve = orsetResolve},
+    .parsed = {0, 0, NULL}};
 
 void initOrSetCrdt(void) {
     registerMultimasterCommandHandler(sdsnew("sadd"), (multimasterCommandHandler *)&saddOrsetHandler);
