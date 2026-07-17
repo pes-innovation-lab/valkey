@@ -1759,30 +1759,30 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
 }
 
 /* Parse and validate the metadata field of an inbound RREPLAY frame.
- * 
+ *
  * 'meta' is the raw bulk-string value at index RREPLAY_META_IDX.
  * Returns `C_OK` and fills '*out' on success, or `C_ERR` on error.
- * Calls the respective command's parse handler. 
+ * Calls the respective command's parse handler.
  * This function requires the executing command to have a handler struct associated with it */
 static int rreplayMultimasterMetadataParse(sds meta, struct serverCommand *cmd) {
     if (meta != NULL && !strcmp(meta, RREPLAY_META_NONE)) return C_OK;
     multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
     if (!handler) return C_ERR;
-    if (handler->parse(handler,meta) != C_OK){
+    if (handler->parse(handler, meta) != C_OK) {
         serverLog(LL_WARNING, "Unsupported metadata format: %s", meta ? meta : "(null)");
         return C_ERR;
     }
     return C_OK;
 }
 
-/* Produce the metadata field for an outbound RREPLAY frame. 
- * Currently a stub that always emits the "none" sentinel; 
- * Calls the serialize function registered with the command handler of the executing command 
+/* Produce the metadata field for an outbound RREPLAY frame.
+ * Currently a stub that always emits the "none" sentinel;
+ * Calls the serialize function registered with the command handler of the executing command
  * This function requires the executing command to have a handler struct associated with it */
 static robj *rreplayMultimasterMetadataSerialize(struct serverCommand *cmd, robj **argv, int argc) {
     multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(cmd);
-    if (handler) return handler->serialize(handler,cmd,argv,argc);
-    return createStringObject(RREPLAY_META_NONE,strlen(RREPLAY_META_NONE));
+    if (handler) return handler->serialize(handler, cmd, argv, argc);
+    return createStringObject(RREPLAY_META_NONE, strlen(RREPLAY_META_NONE));
 }
 
 /* Return the pointer to a string representing the replica ip:listening_port
@@ -2452,8 +2452,8 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
     int payload_argc = argc;
     int payload_owned = 0;
 
-    /* multimaster whitelist gate. 
-     * `processCommand()` will reject non-whitelisted writes before they reach here, 
+    /* multimaster whitelist gate.
+     * `processCommand()` will reject non-whitelisted writes before they reach here,
      * but a commands can slip through through other paths (eg: alsoPropagate),
      * to be a 100% we perform a check on the RREPLAY as well. */
     if (hashtableSize(server.multi_master_whitelist) > 0 && !getMultimasterWhitelistedHandler(payload_cmd)) {
@@ -2503,7 +2503,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
                            (unsigned long long)hlc_ts.wall_time,
                            (unsigned long long)hlc_ts.logical);
     frame_argv[4] = createStringObject(hlc_buf, hlc_len);
-    /* metadata field (index 5). Currently the "none" sentinel; 
+    /* metadata field (index 5). Currently the "none" sentinel;
      * future per-command strategies for multimaster will populate it via rreplayMultimasterMetadataSerialize. */
     frame_argv[RREPLAY_META_IDX] = rreplayMultimasterMetadataSerialize(payload_cmd, payload_argv, payload_argc);
     for (int j = 0; j < payload_argc; j++) {
@@ -3683,7 +3683,7 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    /* multimaster whitelist gate. 
+    /* multimaster whitelist gate.
      * If not in whitelist - skip execution and still ACK the sender & suppress local re-propagation.
      * Skip when the whitelist is empty. */
     if (hashtableSize(server.multi_master_whitelist) > 0 && !getMultimasterWhitelistedHandler(payload_cmd)) {
@@ -3693,7 +3693,7 @@ void rreplayCommand(client *c) {
         return;
     }
 
-    /* Validate the metadata field (id 5). 
+    /* Validate the metadata field (id 5).
      * Skip unrecognized format - (rreplayMultimasterMetadataParse emits the warning) */
     sds command_meta = objectGetVal(c->argv[RREPLAY_META_IDX]);
     if (rreplayMultimasterMetadataParse(command_meta, payload_cmd) != C_OK) {
@@ -3742,7 +3742,9 @@ void rreplayCommand(client *c) {
             if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
             return;
         }
-    } else if (!hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
+    } else if (payload_cmd->proc != saddCommand &&
+               payload_cmd->proc != sremCommand &&
+               !hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
         if (from_primary_link) {
             c->flag.skip_repl_stream_propagation = 1;
         }
@@ -3792,10 +3794,12 @@ void rreplayCommand(client *c) {
     exec_client->lastcmd = payload_cmd;
     exec_client->realcmd = payload_cmd;
     exec_client->slot = -1;
-    
+
     multimasterCommandHandler *handler = getMultimasterWhitelistedHandler(payload_cmd);
-    if (handler && handler->resolve) handler->resolve(handler,exec_client);
-    else call(exec_client, CMD_CALL_PROPAGATE_AOF);
+    if (handler && handler->resolve)
+        handler->resolve(handler, exec_client);
+    else
+        call(exec_client, CMD_CALL_PROPAGATE_AOF);
     hlcStampCommandKeys(payload_cmd, exec_payload_argv, exec_payload_argc, dbid, hlc_ts, replay_tie_break);
     if (exec_client->flag.blocked) {
         serverLog(LL_WARNING, "Invalid RREPLAY from primary: payload command '%s' blocked", payload_cmd->fullname);
