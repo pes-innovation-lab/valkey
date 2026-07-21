@@ -481,6 +481,7 @@ ENGINE_SERVER_OBJ = \
     bitops.o \
     blocked.o \
     bwrga.o \
+    bwrga_handler.o \
     call_reply.o \
     childinfo.o \
     cluster.o \
@@ -491,6 +492,7 @@ ENGINE_SERVER_OBJ = \
     commands.o \
     config.o \
     connection.o \
+    counter_handler.o \
     crc16.o \
     crc16_slottable.o \
     crc64.o \
