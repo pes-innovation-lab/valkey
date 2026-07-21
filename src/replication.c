@@ -1733,7 +1733,7 @@ static int rreplayCommandIsSupported(struct serverCommand *cmd, robj **argv, int
         return 0;
     }
 
-    if (rreplayCommandIsRiskyRmw(cmd)) {
+    if (rreplayCommandIsRiskyRmw(cmd) && !getMultimasterWhitelistedHandler(cmd)) {
         if (reason) *reason = "command is temporarily blocked in replay (risky read-modify-write semantics)";
         return 0;
     }
@@ -2462,7 +2462,7 @@ void replicationFeedPrimaryWithRReplay(int dictid, robj **argv, int argc) {
         return;
     }
 
-    if (rreplayCommandIsRiskyRmw(payload_cmd)) {
+    if (rreplayCommandIsRiskyRmw(payload_cmd) && !getMultimasterWhitelistedHandler(payload_cmd)) {
         const char *canonical_reason = NULL;
         payload_argv = rreplayBuildCanonicalRmwPayload(dictid, payload_cmd, argv, argc, &payload_argc, &canonical_reason);
         if (payload_argv == NULL || payload_argc <= 0) {
@@ -3742,7 +3742,12 @@ void rreplayCommand(client *c) {
             if (should_ack_peer_sender) addReplyLongLong(c, replay_id_ll);
             return;
         }
-    } else if (!hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
+    } else if (!getMultimasterWhitelistedHandler(payload_cmd) &&
+               !hlcCommandIsFresh(payload_cmd, payload_argv, payload_argc, dbid, hlc_ts, replay_tie_break)) {
+        /* Skip the staleness drop for commands with a registered CRDT
+         * handler. Their operations are commutative and must be applied
+         * even if old, since the CRDT resolves conflicts itself. Same
+         * exemption used for the risky RMW gates in this file. */
         if (from_primary_link) {
             c->flag.skip_repl_stream_propagation = 1;
         }
