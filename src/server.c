@@ -51,6 +51,8 @@
 #include "sds.h"
 #include "module.h"
 #include "scripting_engine.h"
+#include "bwrga_handler.h"
+#include "counter_handler.h"
 #include "util.h"
 
 #include "eval.h"
@@ -3159,6 +3161,9 @@ void initServer(void) {
     applyWatchdogPeriod();
 
     if (server.maxmemory_clients != 0) initServerClientMemUsageBuckets();
+
+    bwrgaHandlerInit();
+    counterHandlerInit();
 }
 
 void initListeners(void) {
