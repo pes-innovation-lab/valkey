@@ -83,5 +83,10 @@ sds bwrgaMaterialize(bwrga_t *b);
 /* Sums live fragment lengths without materializing content -- cheap length-only query */
 size_t bwrgaVisibleLength(bwrga_t *b);
 
+/* Fills a single delete range covering every live byte in b, if that
+ * content came from one identity. out_id must be freed by the caller
+ * with rgaIdFree. Returns 0 if more than one identity is still live. */
+int bwrgaSingleLiveIdentityRange(bwrga_t *b, rga_id_t *out_id, uint32_t *out_offset, uint32_t *out_length);
+
 
 #endif

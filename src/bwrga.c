@@ -536,3 +536,47 @@ size_t bwrgaVisibleLength(bwrga_t *b) {
     }
     return len;
 }
+
+/* Walks b's live blocks and checks they share one identity, then
+ * returns the offset span covering them. out_length is 0 if nothing
+ * is live. Returns 0 if two or more identities are found live, since
+ * that cannot be expressed as one delete range. */
+int bwrgaSingleLiveIdentityRange(bwrga_t *b, rga_id_t *out_id, uint32_t *out_offset, uint32_t *out_length) {
+    rga_id_t found_id;
+    found_id.ts.wall_time = 0;
+    found_id.ts.logical = 0;
+    found_id.origin = NULL;
+    int found = 0;
+    uint32_t min_off = 0, max_end = 0;
+
+    rga_block_t *cur = b ? b->head : NULL;
+    while (cur != NULL) {
+        if (!cur->is_tombstone) {
+            if (!found) {
+                found_id = cur->identifier;
+                min_off = cur->offset;
+                max_end = cur->offset + cur->length;
+                found = 1;
+            } else if (rgaIdCompare(&cur->identifier, &found_id) != 0) {
+                return 0;
+            } else {
+                if (cur->offset < min_off) min_off = cur->offset;
+                if (cur->offset + cur->length > max_end) max_end = cur->offset + cur->length;
+            }
+        }
+        cur = cur->nextLink;
+    }
+
+    if (!found) {
+        out_id->ts.wall_time = 0;
+        out_id->ts.logical = 0;
+        out_id->origin = NULL;
+        *out_offset = 0;
+        *out_length = 0;
+        return 1;
+    }
+    *out_id = rgaIdDup(&found_id);
+    *out_offset = min_off;
+    *out_length = max_end - min_off;
+    return 1;
+}
