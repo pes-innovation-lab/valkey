@@ -34,6 +34,7 @@
 
 #include "server.h"
 #include "bwrga.h"
+#include "bwrga_handler.h"
 #include <math.h> /* isnan(), isinf() */
 
 /* Forward declarations */
@@ -250,6 +251,11 @@ static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int 
  *     [EX seconds | PX milliseconds |
  *      EXAT seconds-timestamp | PXAT milliseconds-timestamp | KEEPTTL] */
 void setCommand(client *c) {
+    if (bwrgaIsWhitelisted(c->cmd)) {
+        bwrgaApplySet(c);
+        return;
+    }
+
     robj *expire = NULL;
     robj *comparison = NULL;
     int unit = UNIT_SECONDS;
@@ -441,6 +447,11 @@ void setrangeCommand(client *c) {
     robj *o;
     long offset;
     sds value = objectGetVal(c->argv[3]);
+
+    if (bwrgaIsWhitelisted(c->cmd)) {
+        bwrgaApplySetrange(c);
+        return;
+    }
 
     if (getLongFromObjectOrReply(c, c->argv[2], &offset, NULL) != C_OK)
         return;
@@ -715,6 +726,14 @@ void incrDecrCommand(client *c, long long incr) {
 
     o = lookupKeyWrite(c->db, c->argv[1]);
     if (checkType(c, o, OBJ_STRING)) return;
+    if (o && o->encoding == OBJ_ENCODING_BWRGA) {
+        /* This passes the OBJ_STRING check, but its value is a bwrga_t,
+         * not an sds, so reading it as a string would be wrong. There is
+         * also no clean merge between a text edit and a number delta.
+         * SET is still the way to turn a BWRGA key back into a counter. */
+        addReplyError(c, "value is a BWRGA string and cannot be used as a counter");
+        return;
+    }
     if (getLongLongFromObjectOrReply(c, o, &value, NULL) != C_OK) return;
 
     oldvalue = value;
@@ -806,6 +825,11 @@ void incrbyfloatCommand(client *c) {
 void appendCommand(client *c) {
     size_t totlen;
     robj *o, *append;
+
+    if (bwrgaIsWhitelisted(c->cmd)) {
+        bwrgaApplyAppend(c);
+        return;
+    }
 
     o = lookupKeyWrite(c->db, c->argv[1]);
     if (o == NULL) {
