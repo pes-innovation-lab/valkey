@@ -56,6 +56,8 @@ peer_value* createNewPeer(uint16_t peerid){
     newpeer->peer_id = peerid;
     newpeer->p_val = 0;
     newpeer->n_val = 0;
+    newpeer->hlc_timestamp.wall_time = 0;
+    newpeer->hlc_timestamp.logical = 0;
     return newpeer;
 }
 
@@ -85,32 +87,16 @@ robj *hsetSerialize(multimasterCommandHandler *self, struct serverCommand *cmd, 
     return createStringObject("none", 4);
 }
 
-/* Resolve function for HSET.
- *
- * Performs subkey-level LWW conflict resolution before the actual hsetCommand
- * writes to the database. For each field in the HSET command:
- *   - Look up the CRDT metadata for that field.
- *   - If the incoming HLC is older than the stored reset_hlc, drop that field
- *     (the local value wins).
- *   - Otherwise, update the CRDT metadata with the new base_val and reset_hlc,
- *     compute the merged value via evaluateHashKey, and rewrite the client argv
- *     to carry the resolved value.
- *
- * After resolution, call() is invoked so the clean hsetCommand writes the
- * winning values to the database. */
 void hsetResolve(multimasterCommandHandler *self, client *c) {
     UNUSED(self);
     hlcNextLocalClock();
     hlc *current_hlc = server.current_rreplay_hlc;
     if (!current_hlc) {
-        
         current_hlc = &server.hlc_clock;
     }
 
     sds top_level_key = objectGetVal(c->argv[1]);
 
-    /* We build a new argv that only contains the winning fields.
-     * Worst case: all fields win, so allocate the same size as the original. */
     int new_argc_cap = c->argc;
     robj **new_argv = zmalloc(sizeof(robj *) * new_argc_cap);
     int new_argc = 2; /* argv[0] = command name, argv[1] = key */
@@ -133,6 +119,19 @@ void hsetResolve(multimasterCommandHandler *self, client *c) {
                 hashcrdt->reset_hlc.logical = current_hlc->logical;
                 sdsfree(hashcrdt->base_val);
                 hashcrdt->base_val = sdsdup(objectGetVal(c->argv[i + 1]));
+                /* Clear all peer PN-counters. The HSET resets the field,
+                 * so any pre-reset increments must be discarded. Without
+                 * this, a future HINCRBY from the same peer would add on
+                 * top of the stale p_val/n_val and the old values would
+                 * resurface once the peer's hlc_timestamp exceeds reset_hlc. */
+                listIter li;
+                listNode *ln;
+                listRewind(hashcrdt->list_of_peers, &li);
+                while ((ln = listNext(&li)) != NULL) {
+                    peer_value *peer = listNodeValue(ln);
+                    peer->p_val = 0;
+                    peer->n_val = 0;
+                }
             } else {
                 /* Local value wins. Drop this field from the command. */
                 sdsfree(hashkey);
@@ -175,8 +174,6 @@ void hsetResolve(multimasterCommandHandler *self, client *c) {
         return;
     }
 
-    /* Replace the client's argv with the resolved one. */
-    /* Free old argv entries (the originals). */
     for (int j = 0; j < c->argc; j++) decrRefCount(c->argv[j]);
     zfree(c->argv);
 
@@ -184,41 +181,105 @@ void hsetResolve(multimasterCommandHandler *self, client *c) {
     c->argc = new_argc;
     c->argv_len = new_argc;
 
-    /* Determine the right call() flags based on context.
-     * If current_rreplay_hlc is set, we are inside rreplayCommand (replicated path). */
     int flags = server.current_rreplay_hlc ? CMD_CALL_PROPAGATE_AOF : CMD_CALL_FULL;
     call(c, flags);
 }
 
-/* Stub parse handler for HINCRBY. Currently no extra metadata is parsed. */
 int hincrbyParse(multimasterCommandHandler *self, sds raw) {
-    UNUSED(self);
-    UNUSED(raw);
+    hincrbyCommandHandler *h_self = (hincrbyCommandHandler *)self;
+    if (strcmp(raw, "none") == 0) {
+        h_self->parsed_reset_hlc.wall_time = 0;
+        h_self->parsed_reset_hlc.logical = 0;
+        return C_OK;
+    }
+
+    char *hyphen = strchr(raw, '-');
+    if (!hyphen) return C_ERR;
+
+    char *endptr1 = NULL, *endptr2 = NULL;
+    h_self->parsed_reset_hlc.wall_time = strtoull(raw, &endptr1, 10);
+    h_self->parsed_reset_hlc.logical = strtoull(hyphen + 1, &endptr2, 10);
+    
+    if (endptr1 != hyphen || endptr2 == (hyphen + 1) || *endptr2 != '\0') return C_ERR;
+
     return C_OK;
 }
 
-/* Stub serialize handler for HINCRBY. Returns the "none" sentinel. */
 robj *hincrbySerialize(multimasterCommandHandler *self, struct serverCommand *cmd, robj **argv, int argc) {
     UNUSED(self);
     UNUSED(cmd);
-    UNUSED(argv);
-    UNUSED(argc);
+    if (argc < 3) return createStringObject("none", 4);
+
+    sds top_level_key = objectGetVal(argv[1]);
+    sds hashkey = sdscatfmt(sdsempty(), "%S:%S", top_level_key, objectGetVal(argv[2]));
+    hash_key_field *hashcrdt = dictFetchValue(server.hash_crdt_metadata, hashkey);
+    sdsfree(hashkey);
+
+    if (hashcrdt) {
+        char buf[128];
+        int len = snprintf(buf, sizeof(buf), "%llu-%llu", 
+                           (unsigned long long)hashcrdt->reset_hlc.wall_time, 
+                           (unsigned long long)hashcrdt->reset_hlc.logical);
+        return createStringObject(buf, len);
+    }
     return createStringObject("none", 4);
 }
 
 void hincrbyResolve(multimasterCommandHandler *self, client *c){
-    UNUSED(self);
+    hincrbyCommandHandler *h_self = (hincrbyCommandHandler *)self;
     long long incr;
-    getLongLongFromObjectOrReply(c, c->argv[3], &incr, NULL);
+    if (getLongLongFromObjectOrReply(c, c->argv[3], &incr, NULL) != C_OK) return;
 
-    sds top_level_key = objectGetVal(c->argv[1]);
-    sds hashkey = sdscatfmt(sdsempty(),"%S:%S",top_level_key,objectGetVal(c->argv[2]));
-    /* indexes the crdt dictionary to find the respective crdt struct. */
-    hash_key_field *hashcrdt = dictFetchValue(server.hash_crdt_metadata,hashkey);
+    hlcNextLocalClock();
     hlc *current_hlc = server.current_rreplay_hlc;
     if (!current_hlc){
         current_hlc = &server.hlc_clock;
     }
+
+    sds top_level_key = objectGetVal(c->argv[1]);
+    sds hashkey = sdscatfmt(sdsempty(),"%S:%S",top_level_key,objectGetVal(c->argv[2]));
+    hash_key_field *hashcrdt = dictFetchValue(server.hash_crdt_metadata,hashkey);
+
+    if (!hashcrdt) {
+        hashcrdt = zmalloc(sizeof(hash_key_field));
+        initializeHashKeyField(hashcrdt, current_hlc, "0");
+        dictAdd(server.hash_crdt_metadata, hashkey, hashcrdt);
+        hashkey = NULL; /* dictAdd took ownership of the key */
+    }
+
+    /* Check if this increment belongs to an older epoch (i.e. pre-dates the current HSET).
+     * For replicated commands, check the reset_hlc sent over the network.
+     * For local commands, they are always against the current epoch, so skip this check. */
+    if (server.current_rreplay_hlc) {
+        if (hlcCompare(&h_self->parsed_reset_hlc, &hashcrdt->reset_hlc) < 0) {
+            sds current_val = evaluateHashKey(hashcrdt);
+            long long reply_val;
+            if (string2ll(current_val, sdslen(current_val), &reply_val)) {
+                addReplyLongLong(c, reply_val);
+            } else {
+                addReplyError(c, "hash value is not an integer");
+            }
+            sdsfree(current_val);
+            if (hashkey) sdsfree(hashkey);
+            return;
+        }
+    }
+
+    /* Evaluate the current value to ensure it's an integer before we update any CRDT metadata! */
+    sds resolved_sds = evaluateHashKey(hashcrdt);
+    long long resolved_val;
+    if (string2ll(resolved_sds, sdslen(resolved_sds), &resolved_val) == 0) {
+        /* The field is not an integer string. Let call() run normally so it generates the
+         * standard "hash value is not an integer" error without modifying CRDT state. */
+        sdsfree(resolved_sds);
+        if (hashkey) sdsfree(hashkey);
+        int flags = server.current_rreplay_hlc ? CMD_CALL_PROPAGATE_AOF : CMD_CALL_FULL;
+        call(c, flags);
+        return;
+    }
+    sdsfree(resolved_sds);
+
+    /* The increment is valid. Update the PN-counter. */
     sds origin_uuid = server.incoming_uuid;
     if(!origin_uuid){
         origin_uuid = sdsnew(server.runid);
@@ -231,25 +292,27 @@ void hincrbyResolve(multimasterCommandHandler *self, client *c){
     }
 
     if(incr>=0)
-    target_peer->p_val+=incr;
+        target_peer->p_val+=incr;
     else
-    target_peer->n_val+=incr;
+        target_peer->n_val+=incr;
 
-    target_peer->hlc_timestamp.logical = current_hlc->logical;
-    target_peer->hlc_timestamp.wall_time = current_hlc->wall_time;
+    /* Only update the peer's HLC if the incoming HLC is strictly newer. */
+    if (hlcCompare(current_hlc, &target_peer->hlc_timestamp) > 0) {
+        target_peer->hlc_timestamp.logical = current_hlc->logical;
+        target_peer->hlc_timestamp.wall_time = current_hlc->wall_time;
+    }
 
     if(origin_uuid != server.incoming_uuid)
-    sdsfree(origin_uuid);
+        sdsfree(origin_uuid);
 
-    sds new = evaluateHashKey(hashcrdt);
-    long long value;
-    string2ll(new,sdslen(new),&value);
-    long long pre_increment_val = value-incr;
+    long long pre_increment_val = resolved_val;
 
     robj *o = hashTypeLookupWriteOrCreate(c, c->argv[1]);
     bool expired;
-    hashTypeSet(o, objectGetVal(c->argv[2]), sdsfromlonglong(pre_increment_val), 
+    hashTypeSet(o, objectGetVal(c->argv[2]), sdsfromlonglong(pre_increment_val),
                 EXPIRY_NONE, HASH_SET_TAKE_VALUE, &expired);
+
+    if (hashkey) sdsfree(hashkey);
 
     int flags = server.current_rreplay_hlc ? CMD_CALL_PROPAGATE_AOF : CMD_CALL_FULL;
     call(c, flags);

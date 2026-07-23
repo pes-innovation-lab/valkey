@@ -4008,9 +4008,7 @@ void call(client *c, int flags) {
         }
     }
     
-    /* checks if its a hset command, if it is then it updates the hlc clock */
-    if (c->cmd->proc == hsetCommand || c->cmd->proc == hincrbyCommand)
-    hlcNextLocalClock();
+
     c->cmd->proc(c);
 
     if (c->flag.argv_borrowed && server.enable_debug_assert) {
@@ -8028,11 +8026,11 @@ __attribute__((weak)) int main(int argc, char **argv) {
     hsetHandler->resolve = hsetResolve;
     registerMultimasterCommandHandler(sdsnew("hset"), hsetHandler);
 
-    multimasterCommandHandler *hincrbyHandler = zmalloc(sizeof(multimasterCommandHandler));
-    hincrbyHandler->parse = hincrbyParse;
-    hincrbyHandler->serialize = hincrbySerialize;
-    hincrbyHandler->resolve = hincrbyResolve;
-    registerMultimasterCommandHandler(sdsnew("hincrby"), hincrbyHandler);
+    hincrbyCommandHandler *hincrbyHandler = zmalloc(sizeof(hincrbyCommandHandler));
+    hincrbyHandler->handler.parse = hincrbyParse;
+    hincrbyHandler->handler.serialize = hincrbySerialize;
+    hincrbyHandler->handler.resolve = hincrbyResolve;
+    registerMultimasterCommandHandler(sdsnew("hincrby"), (multimasterCommandHandler *)hincrbyHandler);
 
     if (background || server.pidfile) createPidFile();
     if (server.set_proc_title) serverSetProcTitle(NULL);

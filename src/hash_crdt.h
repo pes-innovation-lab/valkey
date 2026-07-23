@@ -17,6 +17,11 @@ typedef struct{
 } hash_key_field;
 
 
+typedef struct {
+    multimasterCommandHandler handler;
+    hlc parsed_reset_hlc;
+} hincrbyCommandHandler;
+
 void initializeHashKeyField(hash_key_field *crdt,hlc *timestamp, char* base_val);
 sds evaluateHashKey(hash_key_field *crdt);
 peer_value* findPeerByPeerId(hash_key_field *crdt,uint16_t peerid);
