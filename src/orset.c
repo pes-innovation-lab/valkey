@@ -14,7 +14,8 @@
 
 typedef struct orsetParsedMeta {
     int is_sadd;
-    int ntags;
+    int ntags;          /* total number of tags in the tags[] array */
+    int *member_ntags;  /* for SREM: per-member tag counts (NULL for SADD) */
     orsetTag *tags;
 } orsetParsedMeta;
 
@@ -218,8 +219,14 @@ void orsetApplySrem(int dbid, sds key, sds member, orsetTag **tags, int ntags) {
 
 /*========================== Command Handler Functions =======================*/
 
-/* Parse OR-Set metadata from a raw command string. The expected format is:
- * <cmd>,<node_id>:<wall_time>:<logical>[,<node_id>:<wall_time>:<logical>...] */
+/* Parse OR-Set metadata from a raw command string.
+ *
+ * SADD format: sadd,<node_id>:<wall>:<logical>[,<node_id>:<wall>:<logical>...]
+ *   One tag per member (positional, indexed by member order in the command).
+ *
+ * SREM format: srem,<ntags_m0>,<tag0_0>,...,<ntags_m1>,<tag1_0>,...
+ *   Per-member tag counts precede each member's tags.  A count of 0 means the
+ *   member had no OR-Set tags on the source node. */
 int orsetMetadataParse(multimasterCommandHandler *self, sds raw) {
     orsetCommandHandler *osh = (orsetCommandHandler *)self;
 
@@ -227,6 +234,10 @@ int orsetMetadataParse(multimasterCommandHandler *self, sds raw) {
     if (osh->parsed.tags) {
         zfree(osh->parsed.tags);
         osh->parsed.tags = NULL;
+    }
+    if (osh->parsed.member_ntags) {
+        zfree(osh->parsed.member_ntags);
+        osh->parsed.member_ntags = NULL;
     }
 
     osh->parsed.ntags = 0;
@@ -242,25 +253,78 @@ int orsetMetadataParse(multimasterCommandHandler *self, sds raw) {
 
     osh->parsed.tags = zmalloc(sizeof(orsetTag) * count);
     int filled = 0;
-    char *tok = body;
-    while (tok && *tok) {
-        char *comma = strchr(tok, ',');
-        if (comma) *comma = '\0';
 
-        if ((int)strlen(tok) > CONFIG_RUN_ID_SIZE + 1) {
-            char *rest = tok + CONFIG_RUN_ID_SIZE + 1;
-            unsigned long long wall = 0, logical = 0;
-            if (sscanf(rest, "%llu:%llu", &wall, &logical) == 2) {
-                memcpy(osh->parsed.tags[filled].node_id, tok, CONFIG_RUN_ID_SIZE);
-                osh->parsed.tags[filled].node_id[CONFIG_RUN_ID_SIZE] = '\0';
-                osh->parsed.tags[filled].ts.wall_time = wall;
-                osh->parsed.tags[filled].ts.logical = logical;
-                filled++;
+    if (osh->parsed.is_sadd) {
+        /* SADD: plain list of tags, one per member by position */
+        char *tok = body;
+        while (tok && *tok) {
+            char *comma = strchr(tok, ',');
+            if (comma) *comma = '\0';
+
+            if ((int)strlen(tok) > CONFIG_RUN_ID_SIZE + 1) {
+                char *rest = tok + CONFIG_RUN_ID_SIZE + 1;
+                unsigned long long wall = 0, logical = 0;
+                if (sscanf(rest, "%llu:%llu", &wall, &logical) == 2) {
+                    memcpy(osh->parsed.tags[filled].node_id, tok, CONFIG_RUN_ID_SIZE);
+                    osh->parsed.tags[filled].node_id[CONFIG_RUN_ID_SIZE] = '\0';
+                    osh->parsed.tags[filled].ts.wall_time = wall;
+                    osh->parsed.tags[filled].ts.logical = logical;
+                    filled++;
+                }
+            }
+
+            if (comma) *comma = ',';
+            tok = comma ? comma + 1 : NULL;
+        }
+    } else {
+        /* SREM: per-member counts followed by that many tags.
+         * Format: <ntags_m0>,<tag>,...,<ntags_m1>,<tag>,...
+         * We do two passes: first count the number of members, then parse. */
+        int nslots = 0; /* upper bound on number of members */
+        char *p = body;
+        while (p && *p) {
+            char *comma = strchr(p, ',');
+            nslots++;
+            p = comma ? comma + 1 : NULL;
+        }
+        /* nslots >= actual member count; allocate conservatively */
+        osh->parsed.member_ntags = zcalloc(sizeof(int) * nslots);
+
+        int member_idx = 0;
+        char *tok = body;
+        while (tok && *tok) {
+            /* Read the per-member count token */
+            char *comma = strchr(tok, ',');
+            if (comma) *comma = '\0';
+            long long ntags_for_member = 0;
+            string2ll(tok, strlen(tok), &ntags_for_member);
+            if (comma) *comma = ',';
+            tok = comma ? comma + 1 : NULL;
+
+            osh->parsed.member_ntags[member_idx] = (int)ntags_for_member;
+            member_idx++;
+
+            /* Read ntags_for_member tag tokens */
+            for (int k = 0; k < (int)ntags_for_member && tok && *tok; k++) {
+                comma = strchr(tok, ',');
+                if (comma) *comma = '\0';
+
+                if ((int)strlen(tok) > CONFIG_RUN_ID_SIZE + 1) {
+                    char *rest = tok + CONFIG_RUN_ID_SIZE + 1;
+                    unsigned long long wall = 0, logical = 0;
+                    if (sscanf(rest, "%llu:%llu", &wall, &logical) == 2) {
+                        memcpy(osh->parsed.tags[filled].node_id, tok, CONFIG_RUN_ID_SIZE);
+                        osh->parsed.tags[filled].node_id[CONFIG_RUN_ID_SIZE] = '\0';
+                        osh->parsed.tags[filled].ts.wall_time = wall;
+                        osh->parsed.tags[filled].ts.logical = logical;
+                        filled++;
+                    }
+                }
+
+                if (comma) *comma = ',';
+                tok = comma ? comma + 1 : NULL;
             }
         }
-
-        if (comma) *comma = ',';
-        tok = comma ? comma + 1 : NULL;
     }
     osh->parsed.ntags = filled;
     return C_OK;
@@ -334,7 +398,10 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
                 orsetAddMember(c->db->id, key, member);
             }
         } else {
-            /* SREM local: Stash current tags for serialization, then remove from OR-Set */
+            /* SREM local: Stash current tags for serialization (with per-member counts),
+             * then remove from OR-Set.
+             * Wire format: srem,<ntags_m0>,<tag>,...,<ntags_m1>,<tag>,...
+             * A count of 0 for a member means it had no tags (not in OR-Set). */
             if (server.orset_deleted_tags) sdsfree(server.orset_deleted_tags);
             server.orset_deleted_tags = sdsnew("srem");
 
@@ -342,6 +409,8 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
                 sds member = objectGetVal(c->argv[j]);
                 orsetTag **tags = NULL;
                 int ntags = orsetCollectTagsForMember(c->db->id, key, member, &tags);
+                /* Encode the count for this member first */
+                server.orset_deleted_tags = sdscatfmt(server.orset_deleted_tags, ",%i", ntags);
                 for (int k = 0; k < ntags; k++) {
                     server.orset_deleted_tags = sdscatfmt(
                         server.orset_deleted_tags, ",%s:%U:%U",
@@ -360,9 +429,7 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
         /* Use AOF-only propagation. RREPLAY is always sent separately below
          * because a new tag was created even if the member already existed. */
         call(c, CMD_CALL_PROPAGATE_AOF);
-        if (osh->handler.serialize == orsetSaddSerialize) {
-            replicationFeedPrimaryWithRReplay(c->db->id, c->argv, c->argc);
-        }
+        replicationFeedPrimaryWithRReplay(c->db->id, c->argv, c->argc);
         return;
     }
 
@@ -374,23 +441,36 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
     struct serverCommand *orig_lastcmd = c->lastcmd;
     struct serverCommand *orig_realcmd = c->realcmd;
 
-    /* 2. Process each member in the payload. */
+    /* 2. Process each member in the payload.
+     * For SREM, member_ntags[member_idx] tells us how many tags in the flat
+     * tags[] array belong to this member; we advance a cursor through tags[]
+     * as we iterate over members. */
+    int tag_cursor = 0; /* index into osh->parsed.tags[], used for SREM */
     for (int j = 2; j < orig_argc; j++) {
         sds member = objectGetVal(orig_argv[j]);
+        int member_idx = j - 2;
         int is_sadd = osh->parsed.is_sadd;
 
         if (is_sadd) {
-            if ((j - 2) < osh->parsed.ntags) {
-                orsetApplySadd(c->db->id, key, member, &osh->parsed.tags[j - 2]);
+            if (member_idx < osh->parsed.ntags) {
+                orsetApplySadd(c->db->id, key, member, &osh->parsed.tags[member_idx]);
             }
         } else {
-            /* Build a temporary array of pointers to the parsed tags */
-            orsetTag **temp_tags = zmalloc(sizeof(orsetTag *) * osh->parsed.ntags);
-            for (int k = 0; k < osh->parsed.ntags; k++) {
-                temp_tags[k] = &osh->parsed.tags[k];
+            /* Bug 2 fix: apply only this member's own tags (member_ntags[member_idx]),
+             * not all tags. The old code applied every tag to every member, which
+             * could delete tags that belonged to a different member's OR-Set entry. */
+            int ntags_for_member = (osh->parsed.member_ntags && member_idx < orig_argc - 2)
+                                       ? osh->parsed.member_ntags[member_idx]
+                                       : 0;
+            if (ntags_for_member > 0 && tag_cursor + ntags_for_member <= osh->parsed.ntags) {
+                orsetTag **temp_tags = zmalloc(sizeof(orsetTag *) * ntags_for_member);
+                for (int k = 0; k < ntags_for_member; k++) {
+                    temp_tags[k] = &osh->parsed.tags[tag_cursor + k];
+                }
+                orsetApplySrem(c->db->id, key, member, temp_tags, ntags_for_member);
+                zfree(temp_tags);
             }
-            orsetApplySrem(c->db->id, key, member, temp_tags, osh->parsed.ntags);
-            zfree(temp_tags);
+            tag_cursor += ntags_for_member;
         }
 
         /* 3. Determine if the element state in the database needs to change. */
@@ -448,6 +528,10 @@ void orsetResolve(multimasterCommandHandler *self, client *c) {
         zfree(osh->parsed.tags);
         osh->parsed.tags = NULL;
     }
+    if (osh->parsed.member_ntags) {
+        zfree(osh->parsed.member_ntags);
+        osh->parsed.member_ntags = NULL;
+    }
     osh->parsed.ntags = 0;
 }
 
@@ -458,14 +542,14 @@ orsetCommandHandler saddOrsetHandler = {
         .parse = orsetMetadataParse,
         .serialize = orsetSaddSerialize,
         .resolve = orsetResolve},
-    .parsed = {0, 0, NULL}};
+    .parsed = {0, 0, NULL, NULL}};
 
 orsetCommandHandler sremOrsetHandler = {
     .handler = {
         .parse = orsetMetadataParse,
         .serialize = orsetSremSerialize,
         .resolve = orsetResolve},
-    .parsed = {0, 0, NULL}};
+    .parsed = {0, 0, NULL, NULL}};
 
 void initOrSetCrdt(void) {
     registerMultimasterCommandHandler(sdsnew("sadd"), (multimasterCommandHandler *)&saddOrsetHandler);
