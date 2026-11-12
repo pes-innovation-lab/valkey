@@ -2982,7 +2982,8 @@ int setGetKeys(struct serverCommand *cmd, robj **argv, int argc, getKeysResult *
 
     for (int i = 3; i < argc; i++) {
         char *arg = objectGetVal(argv[i]);
-        if ((arg[0] == 'g' || arg[0] == 'G') && (arg[1] == 'e' || arg[1] == 'E') && (arg[2] == 't' || arg[2] == 'T') &&
+        if (argv[i]->encoding == OBJ_ENCODING_RAW &&
+            (arg[0] == 'g' || arg[0] == 'G') && (arg[1] == 'e' || arg[1] == 'E') && (arg[2] == 't' || arg[2] == 'T') &&
             arg[3] == '\0') {
             keys[0].flags = CMD_KEY_RW | CMD_KEY_ACCESS | CMD_KEY_UPDATE;
             return 1;
